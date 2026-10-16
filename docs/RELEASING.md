@@ -14,9 +14,9 @@ All packages in the workspace share one version (lockstep). Releases are cut by 
 
 ## Secrets (on `web-locks/web-locks`)
 
-| Secret             | What                                                                                   |
-| ------------------ | -------------------------------------------------------------------------------------- |
-| `NPM_TOKEN`        | npm automation or granular access token with publish rights to the `@web-locks` scope. |
+| Secret               | What                                                                                                 |
+| -------------------- | ---------------------------------------------------------------------------------------------------- |
+| `NPM_TOKEN`          | npm automation or granular access token with publish rights to the `@web-locks` scope.               |
 | `PAGES_DEPLOY_TOKEN` | Fine-grained personal access token with Contents read/write on `web-locks/web-locks.github.io` only. |
 
 Recommended alternative for npm: configure trusted publishing (OIDC) for both packages on npmjs.com, pointing at this repository and `release.yml`. Then `NPM_TOKEN` can be dropped; provenance is attached automatically and the workflow's `id-token: write` permission is already in place (verify that the pinned pnpm, run through `vp pm`, supports OIDC trusted publishing before relying on it; npm itself needs CLI >= 11.5.1).
