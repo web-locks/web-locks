@@ -1,27 +1,38 @@
 {
   "name": "@web-locks/react-extras",
   "version": "0.0.0",
-  "description": "A starter for creating a TypeScript package.",
-  "homepage": "https://github.com/author/library#readme",
+  "private": true,
+  "description": "Extra React utilities built on @web-locks/react.",
+  "keywords": [
+    "locks",
+    "react",
+    "web-locks"
+  ],
+  "homepage": "https://github.com/web-locks/web-locks#readme",
   "bugs": {
-    "url": "https://github.com/author/library/issues"
+    "url": "https://github.com/web-locks/web-locks/issues"
   },
-  "license": "MIT",
-  "author": "Author Name <author.name@mail.com>",
+  "license": "Apache-2.0",
+  "author": "Tim McQueen <tim.mcqueen@gmail.com>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/author/library.git"
+    "url": "git+https://github.com/web-locks/web-locks.git",
+    "directory": "packages/react-extras"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "type": "module",
+  "sideEffects": false,
   "exports": {
     ".": "./dist/index.mjs",
     "./package.json": "./package.json"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "build": "vp pack",
@@ -35,5 +46,8 @@
     "bumpp": "^12.3.0",
     "typescript": "^7.0.2",
     "vite-plus": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.18.0"
   }
 }

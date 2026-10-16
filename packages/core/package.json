@@ -1,39 +1,54 @@
 {
   "name": "@web-locks/core",
   "version": "0.0.0",
-  "description": "A starter for creating a TypeScript package.",
-  "homepage": "https://github.com/author/library#readme",
+  "description": "Framework-agnostic helpers for the Web Locks API.",
+  "keywords": [
+    "locks",
+    "mutex",
+    "navigator.locks",
+    "web-locks"
+  ],
+  "homepage": "https://github.com/web-locks/web-locks#readme",
   "bugs": {
-    "url": "https://github.com/author/library/issues"
+    "url": "https://github.com/web-locks/web-locks/issues"
   },
-  "license": "MIT",
-  "author": "Author Name <author.name@mail.com>",
+  "license": "Apache-2.0",
+  "author": "Tim McQueen <tim.mcqueen@gmail.com>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/author/library.git"
+    "url": "git+https://github.com/web-locks/web-locks.git",
+    "directory": "packages/core"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "type": "module",
+  "sideEffects": false,
   "exports": {
     ".": "./dist/index.mjs",
     "./package.json": "./package.json"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "build": "vp pack",
     "dev": "vp pack --watch",
     "test": "vp test",
     "check": "vp check",
-    "prepublishOnly": "vp run build"
+    "prepublishOnly": "vp run build",
+    "prepack": "cp ../../LICENSE ."
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
     "bumpp": "^12.3.0",
     "typescript": "^7.0.2",
     "vite-plus": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.18.0"
   }
 }

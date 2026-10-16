@@ -1,39 +1,67 @@
 {
   "name": "@web-locks/react",
   "version": "0.0.0",
-  "description": "A starter for creating a TypeScript package.",
-  "homepage": "https://github.com/author/library#readme",
+  "description": "React bindings for the Web Locks API.",
+  "keywords": [
+    "hooks",
+    "locks",
+    "react",
+    "web-locks"
+  ],
+  "homepage": "https://github.com/web-locks/web-locks#readme",
   "bugs": {
-    "url": "https://github.com/author/library/issues"
+    "url": "https://github.com/web-locks/web-locks/issues"
   },
-  "license": "MIT",
-  "author": "Author Name <author.name@mail.com>",
+  "license": "Apache-2.0",
+  "author": "Tim McQueen <tim.mcqueen@gmail.com>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/author/library.git"
+    "url": "git+https://github.com/web-locks/web-locks.git",
+    "directory": "packages/react"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "type": "module",
+  "sideEffects": false,
   "exports": {
     ".": "./dist/index.mjs",
     "./package.json": "./package.json"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "build": "vp pack",
     "dev": "vp pack --watch",
     "test": "vp test",
     "check": "vp check",
-    "prepublishOnly": "vp run build"
+    "prepublishOnly": "vp run build",
+    "prepack": "cp ../../LICENSE ."
+  },
+  "dependencies": {
+    "@web-locks/core": "workspace:*"
   },
   "devDependencies": {
+    "@testing-library/dom": "catalog:",
+    "@testing-library/react": "catalog:",
     "@types/node": "^26.6.5",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
     "bumpp": "^12.3.0",
+    "jsdom": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
     "typescript": "^7.0.2",
     "vite-plus": "catalog:"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "engines": {
+    "node": ">=22.18.0"
   }
 }

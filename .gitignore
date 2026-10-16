@@ -37,3 +37,6 @@ dist-ssr
 
 # Superpowers scratch
 .superpowers/
+
+# Copied in by prepack
+packages/*/LICENSE
