@@ -23,7 +23,11 @@ behavior (below) is preserved.
 
 ### Constraints
 
-- No runtime dependencies other than the `react` peer. Dev-only tooling is the
+- The published libraries (`@web-locks/core`, `@web-locks/react`) have no
+  runtime dependencies other than the `react` peer (and `react` depending on
+  `@web-locks/core`). This rule does NOT apply to the private example apps and
+  the website, which may use third-party packages for a professional look.
+  Dev-only tooling is the
   Vite+ toolchain already scaffolded (Vite+ 1.3.0, pnpm workspaces, `vp pack`
   / tsdown, Vitest, Oxlint, Oxfmt, `bumpp`) plus the dev-only React test and
   example packages listed in section 7.
@@ -87,7 +91,7 @@ Both are `private`.
 
 ### `apps/core-example` (vanilla TypeScript + HTML)
 
-One page, three panels: leader (live state, Start/Stop), exclusive lock
+Styled with Tailwind CSS v4 and `lucide` icons. One page, three panels: leader (live state, Start/Stop), exclusive lock
 (Acquire/Release, `ifAvailable` toggle via `acquireLock`), lock inspector
 (`queryLocks`, Refresh, auto-refresh toggle).
 
@@ -108,7 +112,9 @@ The same three demos as components, plus the centerpiece **singleton client**:
 - Standby tabs mirror the leader live through a `BroadcastChannel`.
 - Public-facing polish: "open this page in a second tab" instructions, an
   unsupported-browser message, links to the repo and npm packages.
-- Styling: hand-written CSS with design tokens (light and dark). No UI library.
+- Styling: Tailwind CSS v4 (`@tailwindcss/vite`) with light and dark themes,
+  `lucide-react` icons, and `sonner` toasts for leadership changes. No full
+  component library, so the hook usage stays easy to read.
 
 The library itself stays free of any state-sharing opinion; the handoff is a
 documented pattern. A reusable helper could later live in `react-extras`.
@@ -117,7 +123,7 @@ documented pattern. A reusable helper could later live in `react-extras`.
 
 Static landing page for the project: what the packages are, install commands,
 links to both live demos, the npm packages and the repo. Replaces the stock
-starter contents. Kept small; no framework required.
+starter contents. Kept small; no framework required. Tailwind CSS v4 and `lucide` icons.
 
 ## 5. Hosting
 
@@ -172,9 +178,11 @@ not the last npm release. Web Locks needs a secure context; Pages is HTTPS.
   The exact `bumpp` multi-package invocation is verified during planning.
 - Verify with `npm pack --dry-run` and a check that type exports resolve for
   each package.
-- New dev-only dependencies: `react`, `react-dom`, `@types/react`,
-  `@types/react-dom`, `@vitejs/plugin-react`, `jsdom`,
-  `@testing-library/react`.
+- New dev-only dependencies for the libraries: `react`, `react-dom`,
+  `@types/react`, `@types/react-dom`, `jsdom`, `@testing-library/react`.
+- Dependencies of the private apps only (never published): `react`,
+  `react-dom`, `@vitejs/plugin-react`, `tailwindcss`, `@tailwindcss/vite`,
+  `lucide-react`, `lucide`, `sonner`.
 
 ## 8. Documentation
 
