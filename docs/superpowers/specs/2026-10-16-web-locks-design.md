@@ -130,11 +130,11 @@ starter contents. Kept small; no framework required. Tailwind CSS v4 and `lucide
 GitHub serves a project repo at `web-locks.github.io/<repo>/`, so the target
 URLs require the org-site repo `web-locks/web-locks.github.io`.
 
-| App | URL | Vite `base` |
-| --- | --- | --- |
-| `website` | `https://web-locks.github.io/` | `/` |
-| `react-example` | `https://web-locks.github.io/react/` | `/react/` |
-| `core-example` | `https://web-locks.github.io/vanilla/` | `/vanilla/` |
+| App             | URL                                    | Vite `base` |
+| --------------- | -------------------------------------- | ----------- |
+| `website`       | `https://web-locks.github.io/`         | `/`         |
+| `react-example` | `https://web-locks.github.io/react/`   | `/react/`   |
+| `core-example`  | `https://web-locks.github.io/vanilla/` | `/vanilla/` |
 
 `base` is set for production builds only, so local `vp dev` serves from `/`.
 
