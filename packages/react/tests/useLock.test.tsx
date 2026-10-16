@@ -233,6 +233,37 @@ describe("useLock", () => {
     expect(locks.heldNames()).toEqual(["res"]);
   });
 
+  it("release() right after mount, before the grant, never acquires", async () => {
+    const locks = new FakeLockManager();
+    const { result } = renderHook(() => useLock("res", { locks }));
+    await act(async () => {
+      await result.current.release();
+    });
+    expect(result.current.status).toBe("idle");
+    await tick();
+    expect(result.current.status).toBe("idle");
+    expect(locks.heldNames()).toEqual([]);
+  });
+
+  it("release() in the wait window after an option change never acquires", async () => {
+    const locks = new FakeLockManager();
+    const { result, rerender } = renderHook(({ mode }) => useLock("res", { locks, mode }), {
+      initialProps: { mode: "exclusive" as LockMode },
+    });
+    await tick();
+    expect(result.current.status).toBe("held");
+    rerender({ mode: "shared" });
+    let released!: Promise<void>;
+    act(() => {
+      released = result.current.release();
+    });
+    expect(result.current.status).toBe("idle");
+    await tick();
+    await released;
+    expect(result.current.status).toBe("idle");
+    expect(locks.heldNames()).toEqual([]);
+  });
+
   it('renders "idle" via renderToString', () => {
     const locks = new FakeLockManager();
     function Probe() {

@@ -1,4 +1,4 @@
-import { createLockStatus } from "@web-locks/core";
+import { createLockStatus, isSupported } from "@web-locks/core";
 import type { LockState, LockStatusOptions } from "@web-locks/core";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
@@ -12,9 +12,9 @@ type LockStatus = ReturnType<typeof createLockStatus>;
 /** A tiny store that exists before the core status does (that is created in an effect). */
 function createStateStore() {
   let state: LockState = "idle";
-  let current: LockStatus | null = null;
+  let current: { status: LockStatus; released: boolean } | null = null;
   const listeners = new Set<() => void>();
-  return {
+  const store = {
     getState: () => state,
     subscribe: (listener: () => void) => {
       listeners.add(listener);
@@ -27,11 +27,19 @@ function createStateStore() {
       state = next;
       for (const listener of listeners) listener();
     },
-    attach: (status: LockStatus | null) => {
-      current = status;
+    attach: (run: { status: LockStatus; released: boolean } | null) => {
+      current = run;
     },
-    release: () => current?.release() ?? Promise.resolve(),
+    release: () => {
+      const run = current;
+      if (!run) return Promise.resolve();
+      // Also covers the window before the run has started: it must never start.
+      run.released = true;
+      store.set("idle");
+      return run.status.release();
+    },
   };
+  return store;
 }
 
 /**
@@ -85,17 +93,22 @@ export function useLock(
       onAcquired: () => callbacks.current.onAcquired?.(),
       onLost: () => callbacks.current.onLost?.(),
     });
-    store.attach(status);
+    const run = { status, released: false };
+    store.attach(run);
     let cancelled = false;
     let unsubscribe = () => {};
     const sync = () => store.set(status.getState());
-    store.set("pending");
-    void previousRelease.current.then(() => {
-      if (cancelled) return;
-      unsubscribe = status.subscribe(sync);
-      status.start();
-      sync();
-    });
+    store.set(isSupported(locks) ? "pending" : "unsupported");
+    void previousRelease.current
+      .then(() => {
+        if (cancelled || run.released) return;
+        unsubscribe = status.subscribe(sync);
+        status.start();
+        sync();
+      })
+      .catch(() => {
+        // ignore errors thrown by start() or listeners
+      });
     return () => {
       cancelled = true;
       unsubscribe();
