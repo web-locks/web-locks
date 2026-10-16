@@ -185,6 +185,9 @@ catalogs:
     '@vitejs/plugin-react':
       specifier: ^6.1.2
       version: 6.1.2
+    bumpp:
+      specifier: ^12.3.0
+      version: 12.3.0
     jsdom:
       specifier: ^30.1.3
       version: 30.1.3
@@ -223,6 +226,9 @@ importers:
 
   .:
     devDependencies:
+      bumpp:
+        specifier: 'catalog:'
+        version: 12.3.0
       vite-plus:
         specifier: 'catalog:'
         version: 1.3.0(@types/node@26.6.5)(@vitest/ui@5.0.5)(jiti@2.7.0)(jsdom@30.1.3)(typescript@7.0.2)(yaml@2.9.1)

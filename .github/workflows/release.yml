@@ -1,0 +1,43 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  id-token: write # npm provenance
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@56918a6d0c629c55ae8b88826a7d47fda85769ee # v1.9.0
+        with:
+          node-version: "24"
+          cache: true
+          registry-url: "https://registry.npmjs.org"
+      - name: Verify tag matches package version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="$(node -p "require('./packages/core/package.json').version")"
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::tag $TAG does not match packages/core version v$version"; exit 1
+          fi
+      - run: vp check
+      - run: vp run -r test
+      - run: vp run -r build
+      # vp is the only guaranteed tool; `vp pm` forwards to the pinned pnpm.
+      # Private packages are skipped; pnpm publishes in topological order (core before react).
+      - name: Publish
+        run: vp pm publish -r --access public --provenance --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

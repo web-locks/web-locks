@@ -1,0 +1,89 @@
+name: Deploy sites
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never run two deploys at once; let a running deploy finish.
+concurrency:
+  group: deploy-sites
+  cancel-in-progress: false
+
+env:
+  SITE_REPO: git@github.com:web-locks/web-locks.github.io.git
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@56918a6d0c629c55ae8b88826a7d47fda85769ee # v1.9.0
+        with:
+          node-version: "24"
+          cache: true
+      - run: vp check
+      - run: vp run -r test
+      - run: vp run -r build
+      - name: Assemble site
+        run: scripts/assemble-site.sh
+      - name: Publish to web-locks.github.io
+        env:
+          PAGES_DEPLOY_KEY: ${{ secrets.PAGES_DEPLOY_KEY }}
+          SRC_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "$PAGES_DEPLOY_KEY" ]; then
+            echo "::error::secret PAGES_DEPLOY_KEY is not set"; exit 1
+          fi
+          umask 077
+          ssh_dir="$RUNNER_TEMP/pages-ssh"
+          mkdir -p "$ssh_dir"
+          printf '%s\n' "$PAGES_DEPLOY_KEY" > "$ssh_dir/id"
+          chmod 600 "$ssh_dir/id"
+
+          # Pin github.com's ed25519 host key, verified against GitHub's published
+          # fingerprint (https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints).
+          ssh-keyscan -t ed25519 github.com > "$ssh_dir/known_hosts" 2>/dev/null
+          expected='SHA256:+DzY3nMYvMCMN2L/YWwyP3o3yFW2RHxHKlwf5Q+J9is'
+          actual="$(ssh-keygen -lf "$ssh_dir/known_hosts" | awk '{print $2}')"
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::github.com host key fingerprint mismatch (got $actual)"; exit 1
+          fi
+          export GIT_SSH_COMMAND="ssh -i $ssh_dir/id -o IdentitiesOnly=yes -o UserKnownHostsFile=$ssh_dir/known_hosts -o StrictHostKeyChecking=yes"
+
+          work="$RUNNER_TEMP/site-repo"
+          rm -rf "$work"
+          git clone --depth 1 "$SITE_REPO" "$work" || {
+            # First push into a freshly created, empty repo: clone may fail or warn.
+            echo "clone failed; is the repository created and the deploy key added?" >&2
+            exit 1
+          }
+          cd "$work"
+
+          # Replace everything except .git with the freshly assembled site.
+          find . -mindepth 1 -maxdepth 1 -not -name .git -exec rm -rf {} +
+          cp -R "$GITHUB_WORKSPACE/site/." .
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No changes to deploy."
+            exit 0
+          fi
+          git commit -m "deploy: ${SRC_SHA:0:7}"
+          # Empty repo has no default branch yet: push HEAD to main in that case.
+          if git rev-parse --abbrev-ref HEAD | grep -qx HEAD; then
+            git push origin HEAD:main
+          else
+            git push origin "HEAD:$(git rev-parse --abbrev-ref HEAD)"
+          fi
+      - name: Remove deploy key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/pages-ssh" "$RUNNER_TEMP/site-repo"

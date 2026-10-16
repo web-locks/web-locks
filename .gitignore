@@ -43,3 +43,6 @@ packages/*/LICENSE
 
 # Stray declaration output
 packages/*/src/**/*.d.ts
+
+# Assembled Pages tree (scripts/assemble-site.sh)
+site/

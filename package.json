@@ -5,9 +5,11 @@
   "type": "module",
   "scripts": {
     "ready": "vp check && vp run -r test && vp run -r build",
-    "dev": "vp run website#dev"
+    "dev": "vp run website#dev",
+    "release": "bumpp -r"
   },
   "devDependencies": {
+    "bumpp": "catalog:",
     "vite-plus": "catalog:"
   },
   "devEngines": {
