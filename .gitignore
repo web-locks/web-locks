@@ -40,3 +40,6 @@ dist-ssr
 
 # Copied in by prepack
 packages/*/LICENSE
+
+# Stray declaration output
+packages/*/src/**/*.d.ts

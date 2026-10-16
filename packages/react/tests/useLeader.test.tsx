@@ -93,11 +93,46 @@ describe("useLeader", () => {
   });
 
   it('reports "unsupported" once mounted without a lock manager', async () => {
-    const original = Object.getOwnPropertyDescriptor(globalThis.navigator, "locks");
-    const { result } = renderHook(() => useLeader("app"));
+    vi.stubGlobal("navigator", {});
+    try {
+      expect(globalThis.navigator.locks).toBeUndefined();
+      const { result } = renderHook(() => useLeader("app"));
+      await tick();
+      expect(result.current).toBe("unsupported");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("unmounting a standby leaves the queue; unmounting the leader frees the lock", async () => {
+    const locks = new FakeLockManager();
+    const a = renderHook(() => useLeader("app", { locks }));
     await tick();
-    expect(result.current).toBe("unsupported");
-    if (original) Object.defineProperty(globalThis.navigator, "locks", original);
+    const b = renderHook(() => useLeader("app", { locks }));
+    await tick();
+    expect(b.result.current).toBe("standby");
+    expect((await locks.query()).pending).toHaveLength(1);
+    b.unmount();
+    await tick();
+    expect((await locks.query()).pending).toEqual([]);
+    expect(locks.heldNames()).toEqual(["app"]);
+    a.unmount();
+    await tick();
+    expect(locks.heldNames()).toEqual([]);
+  });
+
+  it("disabling while the grant is in flight holds nothing afterwards", async () => {
+    const locks = new FakeLockManager();
+    const request = vi.spyOn(locks, "request");
+    const { rerender } = renderHook(({ enabled }) => useLeader("app", { locks, enabled }), {
+      initialProps: { enabled: true },
+    });
+    // The effect has run and requested the lock, but the grant (a microtask) has not been awaited.
+    expect(request).toHaveBeenCalledTimes(1);
+    rerender({ enabled: false });
+    await tick();
+    expect(locks.heldNames()).toEqual([]);
+    expect((await locks.query()).pending).toEqual([]);
   });
 
   it('renders "pending" via renderToString', () => {

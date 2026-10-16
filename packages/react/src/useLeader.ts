@@ -7,7 +7,7 @@ export type UseLeaderOptions = {
   onPromoted?(): void | Promise<void>;
   /** Runs before leadership is released. */
   onDemoted?(): void | Promise<void>;
-  /** Set to false to step down (and stay out of the election). Defaults to true. */
+  /** Set to false to step down (and stay out of the election). Defaults to true. The hook reports "pending" while disabled. */
   enabled?: boolean;
   /** Lock manager to use; defaults to `navigator.locks`. Keep it referentially stable. */
   locks?: LocksLike;
