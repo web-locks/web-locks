@@ -1,4 +1,5 @@
-import { createMirror, loadSnapshot, saveSnapshot } from "./handoff.ts";
+import { clearSnapshot, createMirror, loadSnapshot, saveSnapshot } from "./handoff.ts";
+import * as mockService from "./mockService.ts";
 import { ServiceClient } from "./serviceClient.ts";
 
 export const SNAPSHOT_INTERVAL_MS = 3_000;
@@ -68,4 +69,13 @@ export function startAutosave(client: ServiceClient): Autosave {
       mirror.close();
     },
   };
+}
+
+/** Ends the session everywhere: forgets the registrations and the snapshot, and tells standby tabs. */
+export function resetSession(): void {
+  mockService.reset();
+  clearSnapshot();
+  const mirror = createMirror();
+  mirror.publish(null);
+  mirror.close();
 }

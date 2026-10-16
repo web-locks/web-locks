@@ -1,11 +1,11 @@
 import { useLeader } from "@web-locks/react";
 import type { LeadershipState } from "@web-locks/react";
 import { useEffect, useRef, useState } from "react";
-import { clearSnapshot, createMirror, loadSnapshot } from "./handoff.ts";
+import { createMirror, loadSnapshot } from "./handoff.ts";
 import * as mockService from "./mockService.ts";
 import { ServiceClient } from "./serviceClient.ts";
 import type { ClientSnapshot } from "./serviceClient.ts";
-import { acquireClient, startAutosave } from "./session.ts";
+import { acquireClient, resetSession, startAutosave } from "./session.ts";
 import type { Autosave } from "./session.ts";
 
 export type SingletonClient = {
@@ -127,8 +127,7 @@ export function useSingletonClient(): SingletonClient {
     reset() {
       if (!client.current) return;
       teardown(false);
-      mockService.reset();
-      clearSnapshot();
+      resetSession(); // standby tabs clear even if re-registering fails
       startOrStepDown(ServiceClient.register);
     },
     rejoin() {

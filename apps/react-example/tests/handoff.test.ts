@@ -1,13 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import {
   clearSnapshot,
+  createMirror,
   loadSnapshot,
   saveSnapshot,
   SNAPSHOT_KEY,
 } from "../src/singleton/handoff.ts";
 import * as mockService from "../src/singleton/mockService.ts";
 import { ServiceClient } from "../src/singleton/serviceClient.ts";
-import { acquireClient, startAutosave } from "../src/singleton/session.ts";
+import { acquireClient, resetSession, startAutosave } from "../src/singleton/session.ts";
 
 const snap = { clientId: "c-1", sessionToken: "tok-abcdefgh", messageCount: 3 };
 
@@ -128,5 +129,21 @@ describe("session handoff", () => {
     vi.advanceTimersByTime(10_000);
     expect(loadSnapshot()).toEqual(client.snapshot());
     autosave.stop();
+  });
+});
+
+describe("resetSession", () => {
+  it("clears registrations and the snapshot, and publishes null to standby tabs", async () => {
+    acquireClient();
+    saveSnapshot(snap);
+    const standby = createMirror();
+    const seen: unknown[] = [];
+    standby.subscribe((s) => seen.push(s));
+    resetSession();
+    expect(mockService.registrations()).toBe(0);
+    expect(loadSnapshot()).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    standby.close();
+    expect(seen).toEqual([null]);
   });
 });

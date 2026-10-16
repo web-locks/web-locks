@@ -80,6 +80,10 @@ export function SingletonDemo() {
               Watch the other tab take over with the same client id while the registration count
               stays at 1.
             </li>
+            <li>
+              A session snapshot expires after 5 minutes, so reopening after a longer gap registers
+              a new session and the count goes up.
+            </li>
           </ol>
         </div>
       </div>
@@ -109,7 +113,7 @@ export function SingletonDemo() {
           <Bug className="size-5 shrink-0" aria-hidden="true" />
           <p className="min-w-0 flex-1">
             Simulated crash: this tab dropped the lock without a final snapshot. The next leader
-            recovers from the last periodic snapshot.
+            recovers from the last snapshot taken on a change.
           </p>
           <Button icon={RotateCcw} onClick={demo.rejoin}>
             Rejoin

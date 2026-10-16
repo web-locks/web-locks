@@ -58,10 +58,7 @@ export function App() {
       </header>
 
       {!isSupported() && (
-        <div
-          role="alert"
-          className="flex items-start gap-2 rounded-xl border border-rose-300 bg-rose-50 p-4 text-sm text-rose-900 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-200"
-        >
+        <div className="flex items-start gap-2 rounded-xl border border-rose-300 bg-rose-50 p-4 text-sm text-rose-900 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-200">
           <TriangleAlert className="size-5 shrink-0" aria-hidden="true" />
           <p>
             The Web Locks API is not supported in this browser. The panels below will report
