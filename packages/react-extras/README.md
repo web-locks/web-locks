@@ -1,23 +1,9 @@
-# vite-plus-starter
+# @web-locks/react-extras
 
-A starter for creating a Vite Plus project.
+Coming soon. This package is private and not yet published.
 
-## Development
+It will hold higher-level helpers built on [`@web-locks/react`](../react), for example the singleton-client state handoff pattern (snapshot in `onDemoted`, periodic snapshots for crash recovery, restore in `onPromoted`, `BroadcastChannel` mirror for standby tabs) packaged as a reusable hook.
 
-- Install dependencies:
+## License
 
-```bash
-vp install
-```
-
-- Run the unit tests:
-
-```bash
-vp test
-```
-
-- Build the library:
-
-```bash
-vp pack
-```
+[Apache-2.0](https://github.com/web-locks/web-locks/blob/main/LICENSE)

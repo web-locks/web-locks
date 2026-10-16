@@ -9,6 +9,12 @@ export type UseLockQueryOptions = {
   locks?: LocksLike;
 };
 
+export type UseLockQueryResult = {
+  held: LockInfo[];
+  pending: LockInfo[];
+  refresh: () => Promise<void>;
+};
+
 type Snapshot = { held: LockInfo[]; pending: LockInfo[] };
 
 // Stable initial value: identical on the server and the first client render.
@@ -33,11 +39,7 @@ function sameList(a: LockInfo[], b: LockInfo[]): boolean {
  * arrive after unmount, or after a newer query started, are ignored; a failed
  * query keeps the previous value. An unchanged snapshot does not re-render.
  */
-export function useLockQuery(options: UseLockQueryOptions = {}): {
-  held: LockInfo[];
-  pending: LockInfo[];
-  refresh: () => Promise<void>;
-} {
+export function useLockQuery(options: UseLockQueryOptions = {}): UseLockQueryResult {
   const { pollInterval, locks } = options;
   const [snapshot, setSnapshot] = useState<Snapshot>(EMPTY);
   const mounted = useRef(false);

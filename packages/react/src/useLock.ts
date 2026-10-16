@@ -7,6 +7,8 @@ export type UseLockOptions = Omit<LockStatusOptions, "signal"> & {
   enabled?: boolean;
 };
 
+export type UseLockResult = { status: LockState; release(): Promise<void> };
+
 type LockStatus = ReturnType<typeof createLockStatus>;
 
 /** A tiny store that exists before the core status does (that is created in an effect). */
@@ -61,10 +63,7 @@ function createStateStore() {
  * `signal` option); `ifAvailable` and `steal` requests never queue. `locks`
  * should be referentially stable.
  */
-export function useLock(
-  name: string,
-  options: UseLockOptions = {},
-): { status: LockState; release(): Promise<void> } {
+export function useLock(name: string, options: UseLockOptions = {}): UseLockResult {
   const { enabled = true, mode, ifAvailable, steal, locks } = options;
   const [store] = useState(createStateStore);
 
