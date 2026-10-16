@@ -58,13 +58,26 @@ export function mount(root: HTMLElement): void {
   const pending = table("Pending", "Pending lock requests");
   const refreshButton = button("Refresh", "refresh-cw", "primary");
   const auto = checkbox("Auto-refresh every second");
-  const updated = el("p", { class: "text-xs text-slate-500", attrs: { "aria-live": "polite" } });
+  const updated = el("p", { class: "text-xs text-slate-500" });
+  const announce = el("p", { class: "sr-only", attrs: { role: "status", "aria-live": "polite" } });
 
-  const refresh = async () => {
-    const snapshot = await queryLocks();
-    held.fill(snapshot.held ?? []);
-    pending.fill(snapshot.pending ?? []);
-    updated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+  let latest = 0;
+  const refresh = async (manual = false) => {
+    const id = ++latest;
+    try {
+      const snapshot = await queryLocks();
+      if (id !== latest) return; // a newer request superseded this one
+      held.fill(snapshot.held ?? []);
+      pending.fill(snapshot.pending ?? []);
+      updated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+      if (manual)
+        announce.textContent = `Locks refreshed: ${snapshot.held?.length ?? 0} held, ${snapshot.pending?.length ?? 0} pending`;
+    } catch (error) {
+      if (id !== latest) return;
+      const message = `Refresh failed: ${error instanceof Error ? error.message : String(error)}`;
+      updated.textContent = message;
+      announce.textContent = message;
+    }
   };
 
   let timer: ReturnType<typeof setInterval> | undefined;
@@ -72,7 +85,7 @@ export function mount(root: HTMLElement): void {
     clearInterval(timer);
     timer = auto.input.checked ? setInterval(() => void refresh(), 1000) : undefined;
   });
-  refreshButton.addEventListener("click", () => void refresh());
+  refreshButton.addEventListener("click", () => void refresh(true));
 
   const c = card(
     "Lock inspector",
@@ -84,6 +97,7 @@ export function mount(root: HTMLElement): void {
     held.node,
     pending.node,
     updated,
+    announce,
   );
   root.append(c.node);
   void refresh();
