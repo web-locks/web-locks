@@ -8,7 +8,12 @@
     "build": "tsc && vp build",
     "preview": "vp preview"
   },
+  "dependencies": {
+    "lucide": "catalog:"
+  },
   "devDependencies": {
+    "@tailwindcss/vite": "catalog:",
+    "tailwindcss": "catalog:",
     "typescript": "^7.0.2",
     "vite": "catalog:",
     "vite-plus": "catalog:"
