@@ -85,7 +85,7 @@ Say your app talks to a web service through a client object that registers itsel
 - `onPromoted` restores the snapshot if it is readable, current-version and recent, and otherwise registers a new client.
 - The leader also posts each snapshot on a `BroadcastChannel`, so standby tabs can show the live state without owning a client.
 
-Two failure modes to design for. The hooks swallow errors thrown by your callbacks, so a throw in `onPromoted` would leave this tab holding the lock with no client; the sample steps down (`stopped`, which sets `enabled: false`) instead, so another tab can take over. And storage can throw (quota, private mode) or hold data from an older app version, so every read and write is guarded, and snapshots are versioned and expire. `MAX_SNAPSHOT_AGE_MS` must be no higher than your service's session lifetime, or a tab could restore a session the service has already expired.
+Two failure modes to design for. An error thrown by your callbacks is reported (to `onError`, or by default to the global `reportError`) but does not end leadership, so a throw in `onPromoted` would leave this tab holding the lock with no client; the sample steps down (`stopped`, which sets `enabled: false`) instead, so another tab can take over. And storage can throw (quota, private mode) or hold data from an older app version, so every read and write is guarded, and snapshots are versioned and expire. `MAX_SNAPSHOT_AGE_MS` must be no higher than your service's session lifetime, or a tab could restore a session the service has already expired.
 
 ```tsx
 import { useEffect, useRef, useState } from "react";
@@ -256,7 +256,11 @@ import type {
 
 Every hook takes an optional `locks` (a `LocksLike`, i.e. `Pick<LockManager, "request" | "query">`) so you can inject a lock manager, for example a fake in tests. It defaults to `navigator.locks`. **`locks` must be referentially stable** (a module-level constant, not an object created during render): a new identity restarts the hook.
 
-Callbacks (`onPromoted`, `onDemoted`, `onAcquired`, `onLost`) are read from the latest render, so changing them never re-elects or re-acquires. The hooks swallow errors thrown by your callbacks; handle errors inside them.
+The published type declarations reference the DOM Web Locks types (`LockManager`, `LockMode`, `LockInfo`, `LockManagerSnapshot`), so your `tsconfig.json` needs `"dom"` in `lib` (or `skipLibCheck`).
+
+Callbacks (`onPromoted`, `onDemoted`, `onAcquired`, `onLost`, `onError`) are read from the latest render, so changing them never re-elects or re-acquires.
+
+**Errors.** `useLeader` and `useLock` pass errors thrown by your callbacks, and failed lock requests, to `onError`. Without `onError` they go to the global [`reportError`](https://developer.mozilla.org/docs/Web/API/Window/reportError) (logged like an uncaught error), or to `console.error` where that does not exist. A throwing `onError` is ignored. Aborts the hooks make themselves (unmount, `enabled: false`, `release()`) are not errors.
 
 ### `useLeader(name: string, options?: UseLeaderOptions): LeadershipState`
 
@@ -266,6 +270,7 @@ Leader election across tabs: one exclusive lock, held until this tab resigns, cl
 | ------------ | ----------------------------- | ------------------------------------------------------------------------------- |
 | `onPromoted` | `() => void \| Promise<void>` | Runs when this tab becomes the leader.                                          |
 | `onDemoted`  | `() => void \| Promise<void>` | Runs before leadership is released, so the next leader never overlaps this one. |
+| `onError`    | `(error: unknown) => void`    | Errors thrown by the callbacks and failed lock requests (retried every second). |
 | `enabled`    | `boolean`                     | Set to `false` to step down and stay out of the election. Defaults to `true`.   |
 | `locks`      | `LocksLike`                   | Lock manager to use. Must be referentially stable.                              |
 
@@ -276,31 +281,34 @@ Leader election across tabs: one exclusive lock, held until this tab resigns, cl
 | `standby`     | Another tab leads; this tab is queued to take over.                          |
 | `unsupported` | No Web Locks API.                                                            |
 
+If another context takes the lock with `steal: true`, `onDemoted` runs, the state becomes `standby` and the tab queues again behind the new holder.
+
 When the page is frozen (Chromium `freeze` event) the tab resigns and stays out of the queue until `resume`. A frozen page cannot run code, so after a freeze the state reads `standby` even though the tab is not queued. With `enabled={false}` the hook reports `pending`, which is also the server snapshot.
 
 ### `useLock(name: string, options?: UseLockOptions): UseLockResult`
 
 Holds the lock `name` for as long as the component is mounted. Returns `{ status: LockState; release(): Promise<void> }`.
 
-| Option        | Type                      | Description                                                                                 |
-| ------------- | ------------------------- | ------------------------------------------------------------------------------------------- |
-| `mode`        | `"exclusive" \| "shared"` | Lock mode. Defaults to `"exclusive"`.                                                       |
-| `ifAvailable` | `boolean`                 | Do not queue: `status` becomes `unavailable` if the lock is taken.                          |
-| `steal`       | `boolean`                 | Take the lock from the current holder, whose `onLost` is called.                            |
-| `enabled`     | `boolean`                 | Set to `false` to release (and not acquire) the lock. Defaults to `true`.                   |
-| `onAcquired`  | `() => void`              | Called each time the lock is acquired.                                                      |
-| `onLost`      | `() => void`              | Called if the lock is taken from this component after it was granted (for example, stolen). |
-| `locks`       | `LocksLike`               | Lock manager to use. Must be referentially stable.                                          |
+| Option        | Type                       | Description                                                                                 |
+| ------------- | -------------------------- | ------------------------------------------------------------------------------------------- |
+| `mode`        | `"exclusive" \| "shared"`  | Lock mode. Defaults to `"exclusive"`.                                                       |
+| `ifAvailable` | `boolean`                  | Do not queue: `status` becomes `unavailable` if the lock is taken.                          |
+| `steal`       | `boolean`                  | Take the lock from the current holder, whose `onLost` is called.                            |
+| `enabled`     | `boolean`                  | Set to `false` to release (and not acquire) the lock. Defaults to `true`.                   |
+| `onAcquired`  | `() => void`               | Called each time the lock is acquired.                                                      |
+| `onLost`      | `() => void`               | Called if the lock is taken from this component after it was granted (for example, stolen). |
+| `onError`     | `(error: unknown) => void` | Errors thrown by `onAcquired`/`onLost`, and requests that fail (then `status` is `idle`).   |
+| `locks`       | `LocksLike`                | Lock manager to use. Must be referentially stable.                                          |
 
-There is no `signal` option: the hook aborts a queued request itself on unmount or when its inputs change. `ifAvailable` and `steal` requests never queue.
+There is no `signal` option: the hook aborts a queued request itself on unmount or when its inputs change. `ifAvailable` and `steal` requests never queue. An invalid combination (`steal` with `ifAvailable` or `mode: "shared"`) fails: it is reported to `onError` and `status` stays `idle`.
 
-| State         | Meaning                                                                      |
-| ------------- | ---------------------------------------------------------------------------- |
-| `idle`        | Server render, first client render, `enabled` is `false`, released, or lost. |
-| `pending`     | Requested and queued.                                                        |
-| `held`        | This tab holds the lock.                                                     |
-| `unavailable` | `ifAvailable` was set and the lock was taken.                                |
-| `unsupported` | No Web Locks API.                                                            |
+| State         | Meaning                                                                              |
+| ------------- | ------------------------------------------------------------------------------------ |
+| `idle`        | Server render, first client render, `enabled` is `false`, released, lost, or failed. |
+| `pending`     | Requested and queued.                                                                |
+| `held`        | This tab holds the lock.                                                             |
+| `unavailable` | `ifAvailable` was set and the lock was taken.                                        |
+| `unsupported` | No Web Locks API.                                                                    |
 
 The lock is released on unmount, when `enabled` becomes `false`, and when `name`, `mode`, `ifAvailable`, `steal` or `locks` change (it is then re-acquired, once the previous lock is fully released). A stolen lock is not re-acquired automatically: `status` becomes `idle` and `onLost` runs.
 
@@ -327,7 +335,10 @@ Importing the package has no side effects and never touches `navigator` or `docu
 
 ## StrictMode
 
-Safe. StrictMode's mount, unmount, mount sequence leaves exactly one lock held or queued: the discarded first run is released before the second one requests.
+Safe. StrictMode's mount, unmount, mount sequence leaves exactly one lock held or queued.
+
+- `useLock`: the discarded first run is released before the second one requests, so the second run goes straight from `pending` to `held`.
+- `useLeader`: both runs request the lock back to back. The discarded run releases without ever being promoted (`onPromoted` runs once), but the second run can briefly report `standby` before it becomes `leader`. This transient happens only in development under StrictMode.
 
 ## Browser support
 

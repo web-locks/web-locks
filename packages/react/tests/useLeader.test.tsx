@@ -154,4 +154,65 @@ describe("useLeader", () => {
     await tick();
     expect(getByTestId("s").textContent).toBe("leader");
   });
+
+  it("forwards errors to onError; changing onError does not re-elect and the latest one is used", async () => {
+    const locks = new FakeLockManager();
+    const request = vi.spyOn(locks, "request");
+    const boom = new Error("demote failed");
+    const first = vi.fn();
+    const second = vi.fn();
+    const onDemoted = () => {
+      throw boom;
+    };
+    const { rerender, unmount, result } = renderHook(
+      ({ onError }) => useLeader("app", { locks, onDemoted, onError }),
+      { initialProps: { onError: first } },
+    );
+    await tick();
+    expect(result.current).toBe("leader");
+    const count = request.mock.calls.length;
+    rerender({ onError: second });
+    await tick();
+    expect(request.mock.calls.length).toBe(count);
+    unmount();
+    await tick();
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledWith(boom);
+    expect(locks.heldNames()).toEqual([]);
+  });
+
+  it("reports a failing lock request to onError", async () => {
+    const failure = new DOMException("denied", "SecurityError");
+    const locks = {
+      request: () => Promise.reject(failure),
+      query: async () => ({ held: [], pending: [] }),
+    } as never;
+    const onError = vi.fn();
+    const { unmount } = renderHook(() => useLeader("app", { locks, onError }));
+    await tick();
+    expect(onError).toHaveBeenCalledWith(failure);
+    unmount();
+  });
+
+  it("without onError, errors go to the global reportError", async () => {
+    const hostReport = vi.fn();
+    vi.stubGlobal("reportError", hostReport);
+    try {
+      const locks = new FakeLockManager();
+      const boom = new Error("promote failed");
+      const { unmount } = renderHook(() =>
+        useLeader("app", {
+          locks,
+          onPromoted: () => {
+            throw boom;
+          },
+        }),
+      );
+      await tick();
+      expect(hostReport).toHaveBeenCalledWith(boom);
+      unmount();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

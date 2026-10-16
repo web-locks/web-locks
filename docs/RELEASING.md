@@ -44,6 +44,7 @@ Hardening (recommended):
 - [ ] `NPM_TOKEN` (or trusted publishing) and `PAGES_DEPLOY_KEY` are set; the `@web-locks` npm scope exists and you own it.
 - [ ] `web-locks.github.io` exists, deploy key added, Pages enabled.
 - [ ] `vp pm publish -r --dry-run --no-git-checks --access public` lists only `@web-locks/core` and `@web-locks/react`.
+- [ ] Do the first release as a dry run (the release workflow's publish step with `--dry-run`, e.g. on a fork or throwaway tag) and verify that the `registry-url` input of `setup-vp` writes the npm auth config (an `.npmrc` using `NODE_AUTH_TOKEN`); without it the real publish fails with `ENEEDAUTH`.
 - [ ] After release: check the npm pages show the provenance badge and the site loads at `/`, `/react/`, `/vanilla/`.
 
 ## Troubleshooting

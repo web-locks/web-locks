@@ -93,7 +93,13 @@ if (!isSupported()) showFallback();
 
 ## API reference
 
-Every function accepts an optional `locks` (a `LocksLike`, i.e. `Pick<LockManager, "request" | "query">`) so you can inject a lock manager, for example a fake in tests. It defaults to `navigator.locks`.
+Every function can use an injected lock manager, for example a fake in tests: `isSupported` and `queryLocks` take it as their argument, the others as the `locks` option. It is a `LocksLike` (`Pick<LockManager, "request" | "query">`) and defaults to `navigator.locks`.
+
+The published type declarations reference the DOM Web Locks types (`LockManager`, `LockMode`, `LockInfo`, `LockManagerSnapshot`), so your `tsconfig.json` needs `"dom"` in `lib` (or `skipLibCheck`).
+
+### Errors
+
+Errors the library cannot throw to you (a throwing callback, a failed lock request) go to the `onError` option. Without `onError` they are passed to the global [`reportError`](https://developer.mozilla.org/docs/Web/API/Window/reportError) (which logs them like an uncaught error), or to `console.error` where that does not exist. A throwing `onError` is ignored. Aborts the library makes itself (releasing, stopping, freezing) and aborts through your own `signal` are not errors.
 
 ### `isSupported(locks?: LocksLike): boolean`
 
@@ -107,27 +113,28 @@ Resolves `navigator.locks.query()`: `{ held?, pending? }` (both fields are optio
 
 Requests the lock `name` and resolves a handle once it is granted.
 
-| Option        | Type                      | Description                                                                                     |
-| ------------- | ------------------------- | ----------------------------------------------------------------------------------------------- |
-| `mode`        | `"exclusive" \| "shared"` | Lock mode. Defaults to `"exclusive"`.                                                           |
-| `ifAvailable` | `boolean`                 | Do not queue: resolve `null` if the lock is taken.                                              |
-| `steal`       | `boolean`                 | Take the lock from the current holder, whose `onLost` is called.                                |
-| `signal`      | `AbortSignal`             | Abort a queued request. The promise rejects with `AbortError`.                                  |
-| `locks`       | `LocksLike`               | Lock manager to use.                                                                            |
-| `onLost`      | `() => void`              | Called if the lock is taken from this holder after it was granted (for example, it was stolen). |
+| Option        | Type                       | Description                                                                                     |
+| ------------- | -------------------------- | ----------------------------------------------------------------------------------------------- |
+| `mode`        | `"exclusive" \| "shared"`  | Lock mode. Defaults to `"exclusive"`.                                                           |
+| `ifAvailable` | `boolean`                  | Do not queue: resolve `null` if the lock is taken.                                              |
+| `steal`       | `boolean`                  | Take the lock from the current holder, whose `onLost` is called.                                |
+| `signal`      | `AbortSignal`              | Abort a queued request. The promise rejects with `signal.reason` (an `AbortError` by default).  |
+| `locks`       | `LocksLike`                | Lock manager to use.                                                                            |
+| `onLost`      | `() => void`               | Called if the lock is taken from this holder after it was granted (for example, it was stolen). |
+| `onError`     | `(error: unknown) => void` | Receives errors thrown by `onLost`. See [Errors](#errors).                                      |
 
-Resolves `null` when the API is unsupported or when `ifAvailable` finds the lock taken. A `LockHandle` has `name` and `release(): Promise<void>`; `release()` is idempotent and resolves once the underlying request has finished.
+Resolves `null` when the API is unsupported or when `ifAvailable` finds the lock taken, and rejects when the request fails before it is granted (an aborted `signal`, or an invalid request such as `steal` with `ifAvailable`). A `LockHandle` has `name` and `release(): Promise<void>`; `release()` is idempotent and resolves once the underlying request has finished.
 
-### `createLockStatus(name: string, options?: LockStatusOptions): Store<LockState> & { start(): void; release(): Promise<void> }`
+### `createLockStatus(name: string, options?: LockStatusOptions): LockStatus`
 
-Tracks one lock's lifecycle. Takes every `acquireLock` option plus `onAcquired?: () => void` (called each time the lock is acquired; errors are swallowed). Returns a `Store<LockState>` (`getState()`, `subscribe(listener)`; compatible with `useSyncExternalStore`) plus:
+Tracks one lock's lifecycle. Takes every `acquireLock` option plus `onAcquired?: () => void` (called each time the lock is acquired). `onError` receives errors thrown by `onAcquired` or `onLost`, and requests that fail before the grant (for example `steal` combined with `ifAvailable` or `mode: "shared"`), after which the state returns to `idle`. Returns a `LockStatus`: a `Store<LockState>` (`getState()`, `subscribe(listener)`; compatible with `useSyncExternalStore`) plus:
 
 - `start(): void` begins acquiring. No-op unless the state is `idle`.
 - `release(): Promise<void>` releases the lock or cancels a queued request, returns to `idle`, and resolves when the release has finished.
 
 | State         | Meaning                                       |
 | ------------- | --------------------------------------------- |
-| `idle`        | Not started, released, or the lock was lost.  |
+| `idle`        | Not started, released, failed, or lost.       |
 | `pending`     | Requested and queued.                         |
 | `held`        | This tab holds the lock.                      |
 | `unavailable` | `ifAvailable` was set and the lock was taken. |
@@ -144,7 +151,7 @@ Leader election: one exclusive lock, held until this tab resigns, closes, crashe
 | `name`       | `string`                      | Lock name every competing tab uses.                                           |
 | `onPromoted` | `() => void \| Promise<void>` | Runs when this tab becomes the leader.                                        |
 | `onDemoted`  | `() => void \| Promise<void>` | Runs before the lock is released, so the next leader never overlaps this one. |
-| `onError`    | `(error: unknown) => void`    | Receives errors thrown by the hooks and failed lock requests.                 |
+| `onError`    | `(error: unknown) => void`    | Errors thrown by the hooks and failed lock requests. See [Errors](#errors).   |
 | `locks`      | `LocksLike`                   | Lock manager to use.                                                          |
 | `pageEvents` | `PageEvents`                  | Freeze/resume source. Defaults to `windowPageEvents` when `document` exists.  |
 
@@ -157,6 +164,8 @@ Returns a `Store<LeadershipState>` plus `start(): void` and `stop(): Promise<voi
 | `standby`     | Another tab leads; this tab is queued to take over. |
 | `unsupported` | No Web Locks API.                                   |
 
+A failed lock request (for example a `SecurityError` in a sandboxed iframe) is reported to `onError` and retried every second until `stop()`. If another context takes the lock with `steal: true`, the leader runs `onDemoted`, becomes `standby` and queues again behind the new holder.
+
 When the page is frozen (Chromium `freeze` event) the tab resigns and stays out of the queue until `resume`. A frozen page cannot run code, so while frozen the state reads `standby` even though the tab is not queued.
 
 ### `windowPageEvents: PageEvents`
@@ -165,7 +174,7 @@ The real page-lifecycle bridge: `onFreeze(cb)` and `onResume(cb)` listen on `doc
 
 ### Types
 
-`LocksLike`, `Store<T>`, `LeadershipState`, `LockState`, `AcquireOptions`, `LockHandle`, `LockStatusOptions`, `LeaderOptions`, `Leader`, `PageEvents`.
+`LocksLike`, `Store<T>`, `LeadershipState`, `LockState`, `AcquireOptions`, `LockHandle`, `LockStatus`, `LockStatusOptions`, `LeaderOptions`, `Leader`, `PageEvents`.
 
 ## SSR
 

@@ -272,4 +272,67 @@ describe("useLock", () => {
     expect(renderToString(<Probe />)).toContain("idle");
     expect(locks.heldNames()).toEqual([]);
   });
+
+  it("forwards errors to onError; changing onError does not re-acquire and the latest one is used", async () => {
+    const locks = new FakeLockManager();
+    const request = vi.spyOn(locks, "request");
+    const boom = new Error("lost handler failed");
+    const first = vi.fn();
+    const second = vi.fn();
+    const onLost = () => {
+      throw boom;
+    };
+    const { rerender, result } = renderHook(
+      ({ onError }) => useLock("res", { locks, onLost, onError }),
+      { initialProps: { onError: first } },
+    );
+    await tick();
+    expect(result.current.status).toBe("held");
+    rerender({ onError: second });
+    await tick();
+    expect(request).toHaveBeenCalledTimes(1);
+    const thief = locks.request("res", { steal: true }, async () => {});
+    await tick();
+    await thief;
+    expect(result.current.status).toBe("idle");
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledWith(boom);
+  });
+
+  it("an invalid request is reported to onError and ends idle", async () => {
+    const failure = new DOMException("steal and ifAvailable", "NotSupportedError");
+    const locks = {
+      request: () => Promise.reject(failure),
+      query: async () => ({ held: [], pending: [] }),
+    } as never;
+    const onError = vi.fn();
+    const { result } = renderHook(() =>
+      useLock("res", { locks, steal: true, ifAvailable: true, onError }),
+    );
+    await tick();
+    expect(result.current.status).toBe("idle");
+    expect(onError).toHaveBeenCalledWith(failure);
+  });
+
+  it("without onError, a throwing onAcquired goes to the global reportError", async () => {
+    const hostReport = vi.fn();
+    vi.stubGlobal("reportError", hostReport);
+    try {
+      const locks = new FakeLockManager();
+      const boom = new Error("acquired failed");
+      const { result } = renderHook(() =>
+        useLock("res", {
+          locks,
+          onAcquired: () => {
+            throw boom;
+          },
+        }),
+      );
+      await tick();
+      expect(result.current.status).toBe("held");
+      expect(hostReport).toHaveBeenCalledWith(boom);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

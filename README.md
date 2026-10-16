@@ -108,7 +108,7 @@ Run a site locally with `vp run website#dev`, or `vp dev` inside an app's direct
 
 ### Testing
 
-Tests do not need a browser's lock manager. `tools/fake-locks` provides an in-memory `LockManager` implementation (exclusive and shared modes, `ifAvailable`, `steal`, abort signals, `query`) that can be injected through the `locks` option every core function and React hook accepts, so multi-tab scenarios run deterministically in one process.
+Tests do not need a browser's lock manager. `tools/fake-locks` provides an in-memory `LockManager` implementation (exclusive and shared modes, `ifAvailable`, `steal`, abort signals, `query`) that can be injected into every core function and React hook (`isSupported` and `queryLocks` take it as their argument, everything else as the `locks` option), so multi-tab scenarios run deterministically in one process.
 
 ## Releasing
 

@@ -1,15 +1,18 @@
 import { createLockStatus, isSupported } from "@web-locks/core";
-import type { LockState, LockStatusOptions } from "@web-locks/core";
+import type { LockState, LockStatus, LockStatusOptions } from "@web-locks/core";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { reportError } from "./reportError.ts";
 
 export type UseLockOptions = Omit<LockStatusOptions, "signal"> & {
   /** Set to false to release (and not acquire) the lock. Defaults to true. */
   enabled?: boolean;
 };
 
-export type UseLockResult = { status: LockState; release(): Promise<void> };
-
-type LockStatus = ReturnType<typeof createLockStatus>;
+export type UseLockResult = {
+  status: LockState;
+  /** Frees the held lock (or aborts the queued request) and returns to "idle". */
+  release: () => Promise<void>;
+};
 
 /** A tiny store that exists before the core status does (that is created in an effect). */
 function createStateStore() {
@@ -58,7 +61,10 @@ function createStateStore() {
  * `release()` frees the held lock now and returns the status to "idle". It does
  * not re-acquire on the next render: the lock is acquired again only when the
  * name/options above change or the component remounts. Callbacks
- * (`onAcquired`, `onLost`) live in refs, so changing them never re-acquires.
+ * (`onAcquired`, `onLost`, `onError`) live in refs, so changing them never
+ * re-acquires. Errors thrown by `onAcquired`/`onLost` and failed requests
+ * (e.g. `steal` with `ifAvailable`, which then ends "idle") go to `onError`,
+ * defaulting to the global `reportError` (or `console.error`).
  * Queued requests are aborted by the hook itself on unmount (there is no
  * `signal` option); `ifAvailable` and `steal` requests never queue. `locks`
  * should be referentially stable.
@@ -91,6 +97,7 @@ export function useLock(name: string, options: UseLockOptions = {}): UseLockResu
       locks,
       onAcquired: () => callbacks.current.onAcquired?.(),
       onLost: () => callbacks.current.onLost?.(),
+      onError: (error) => reportError(callbacks.current.onError, error),
     });
     const run = { status, released: false };
     store.attach(run);

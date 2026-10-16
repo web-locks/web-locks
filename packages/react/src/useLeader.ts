@@ -1,12 +1,19 @@
 import { createLeader } from "@web-locks/core";
 import type { LeadershipState, LocksLike } from "@web-locks/core";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { reportError } from "./reportError.ts";
 
 export type UseLeaderOptions = {
   /** Runs when this tab becomes the leader. */
   onPromoted?(): void | Promise<void>;
   /** Runs before leadership is released. */
   onDemoted?(): void | Promise<void>;
+  /**
+   * Receives errors thrown by `onPromoted`/`onDemoted` and failed lock
+   * requests (which are retried every second). Defaults to the global
+   * `reportError` (or `console.error`). Changing it never re-elects.
+   */
+  onError?: (error: unknown) => void;
   /** Set to false to step down (and stay out of the election). Defaults to true. The hook reports "pending" while disabled. */
   enabled?: boolean;
   /** Lock manager to use; defaults to `navigator.locks`. Keep it referentially stable. */
@@ -35,7 +42,9 @@ function createStateStore() {
 
 /**
  * Leader election across tabs. Returns "pending" on the server and on the
- * first client render; the election starts after mount.
+ * first client render; the election starts after mount. Callbacks
+ * (`onPromoted`, `onDemoted`, `onError`) live in refs, so changing them never
+ * re-elects.
  */
 export function useLeader(name: string, options: UseLeaderOptions = {}): LeadershipState {
   const { enabled = true, locks } = options;
@@ -57,6 +66,7 @@ export function useLeader(name: string, options: UseLeaderOptions = {}): Leaders
       locks,
       onPromoted: () => callbacks.current.onPromoted?.(),
       onDemoted: () => callbacks.current.onDemoted?.(),
+      onError: (error) => reportError(callbacks.current.onError, error),
     });
     const sync = () => store.set(leader.getState());
     const unsubscribe = leader.subscribe(sync);
