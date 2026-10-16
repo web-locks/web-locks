@@ -30,7 +30,7 @@ export class ServiceClient {
 
   send(): void {
     this.#state = { ...this.#state, messageCount: this.#state.messageCount + 1 };
-    for (const listener of [...this.#listeners]) listener();
+    for (const listener of this.#listeners) listener();
   }
 
   /** Subscribes to state changes; returns the unsubscribe function. */

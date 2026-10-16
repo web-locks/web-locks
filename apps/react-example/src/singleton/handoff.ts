@@ -1,6 +1,6 @@
 import type { ClientSnapshot } from "./serviceClient.ts";
 
-export const SNAPSHOT_KEY = "web-locks-demo.snapshot";
+export const SNAPSHOT_KEY = "web-locks-demo.react.snapshot";
 const VERSION = 1; // bump when ClientSnapshot changes shape
 /** Keep at or below the service's session lifetime. */
 export const MAX_SNAPSHOT_AGE_MS = 5 * 60_000;

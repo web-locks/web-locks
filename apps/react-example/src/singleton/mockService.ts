@@ -1,6 +1,6 @@
 import type { ClientSnapshot } from "./serviceClient.ts";
 
-export const REGISTRATIONS_KEY = "web-locks-demo.registrations";
+export const REGISTRATIONS_KEY = "web-locks-demo.react.registrations";
 
 /** How many clients have registered with the (mock) service. */
 export function registrations(): number {

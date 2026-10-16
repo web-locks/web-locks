@@ -53,7 +53,7 @@ export function mount(root: HTMLElement): void {
     note = "";
     // The status store is configured once, so build a fresh one per acquire
     // to honor the current "if available" setting.
-    const next = createLockStatus("web-locks-demo.resource", {
+    const next = createLockStatus("web-locks-demo.vanilla.resource", {
       ifAvailable: ifAvailable.input.checked,
     });
     status = next;

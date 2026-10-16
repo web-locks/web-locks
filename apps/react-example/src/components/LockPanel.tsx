@@ -18,7 +18,7 @@ export function LockPanel() {
   const [ifAvailable, setIfAvailable] = useState(false);
   const [note, setNote] = useState("");
 
-  const { status, release } = useLock("web-locks-demo.resource", {
+  const { status, release } = useLock("web-locks-demo.react.resource", {
     enabled,
     ifAvailable,
     onAcquired: () => setNote("Lock acquired."),

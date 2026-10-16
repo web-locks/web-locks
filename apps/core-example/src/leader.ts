@@ -28,7 +28,7 @@ export function mount(root: HTMLElement): void {
   };
 
   const leader = createLeader({
-    name: "web-locks-demo.leader",
+    name: "web-locks-demo.vanilla.leader",
     onPromoted: () => addLog("Promoted: this tab is the leader"),
     onDemoted: () => addLog("Demoted: this tab gave up leadership"),
     onError: (error) => addLog(`Error: ${error instanceof Error ? error.message : String(error)}`),

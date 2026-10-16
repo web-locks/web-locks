@@ -19,11 +19,11 @@ export type SingletonClient = {
   crashed: boolean;
   /** Startup failed, so the tab stepped down. */
   error: string | null;
-  send(): void;
-  simulateCrash(): void;
-  reset(): void;
+  send: () => void;
+  simulateCrash: () => void;
+  reset: () => void;
   /** Rejoin the election after a crash or a failed startup. */
-  rejoin(): void;
+  rejoin: () => void;
 };
 
 /** One client for the whole origin: the leader owns it, other tabs mirror it. */
@@ -76,7 +76,7 @@ export function useSingletonClient(): SingletonClient {
     refreshCount();
   }
 
-  const state = useLeader("web-locks-demo.client", {
+  const state = useLeader("web-locks-demo.react.client", {
     enabled: !stopped,
     onPromoted() {
       if (client.current) return; // already own one (never register twice)
@@ -118,19 +118,19 @@ export function useSingletonClient(): SingletonClient {
     crashed,
     error,
     send: () => client.current?.send(),
-    simulateCrash() {
+    simulateCrash: () => {
       crashing.current = true;
       teardown(false); // stop autosave WITHOUT a final snapshot
       setCrashed(true);
       setStopped(true); // drop the lock; the next tab recovers the last snapshot
     },
-    reset() {
+    reset: () => {
       if (!client.current) return;
       teardown(false);
       resetSession(); // standby tabs clear even if re-registering fails
-      startOrStepDown(ServiceClient.register);
+      startOrStepDown(() => ServiceClient.register());
     },
-    rejoin() {
+    rejoin: () => {
       crashing.current = false;
       setCrashed(false);
       setError(null);

@@ -29,7 +29,7 @@ export function LeaderPanel() {
       ].slice(0, MAX_LOG),
     );
 
-  const state = useLeader("web-locks-demo.leader", {
+  const state = useLeader("web-locks-demo.react.leader", {
     enabled: running,
     onPromoted: () => add("Promoted: this tab is the leader"),
     onDemoted: () => add("Demoted: this tab gave up leadership"),
