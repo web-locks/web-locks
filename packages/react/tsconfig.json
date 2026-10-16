@@ -16,6 +16,7 @@
     "esModuleInterop": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "paths": { "@web-locks/core": ["../core/src/index.ts"] }
   }
 }
