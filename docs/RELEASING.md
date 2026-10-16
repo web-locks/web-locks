@@ -17,7 +17,7 @@ All packages in the workspace share one version (lockstep). Releases are cut by 
 | Secret             | What                                                                                   |
 | ------------------ | -------------------------------------------------------------------------------------- |
 | `NPM_TOKEN`        | npm automation or granular access token with publish rights to the `@web-locks` scope. |
-| `PAGES_DEPLOY_KEY` | Private half of a write-enabled deploy key for `web-locks/web-locks.github.io`.        |
+| `PAGES_DEPLOY_TOKEN` | Fine-grained personal access token with Contents read/write on `web-locks/web-locks.github.io` only. |
 
 Recommended alternative for npm: configure trusted publishing (OIDC) for both packages on npmjs.com, pointing at this repository and `release.yml`. Then `NPM_TOKEN` can be dropped; provenance is attached automatically and the workflow's `id-token: write` permission is already in place (verify that the pinned pnpm, run through `vp pm`, supports OIDC trusted publishing before relying on it; npm itself needs CLI >= 11.5.1).
 
@@ -32,17 +32,16 @@ Hardening (recommended):
 ## One-time Pages setup
 
 1. Create an empty, public repository `web-locks/web-locks.github.io` (no README or license).
-2. Generate a key pair locally, never committed: `ssh-keygen -t ed25519 -N '' -C pages-deploy -f ./pages-deploy`.
-3. On `web-locks/web-locks.github.io`: Settings, Deploy keys, add `pages-deploy.pub` and tick "Allow write access".
-4. On `web-locks/web-locks`: Settings, Secrets and variables, Actions, new secret `PAGES_DEPLOY_KEY` with the contents of `pages-deploy` (the private key). Then delete both local key files.
-5. On `web-locks/web-locks.github.io`: Settings, Pages, deploy from branch, the default branch (`main`), folder `/ (root)`.
-6. Run the "Deploy sites" workflow via workflow_dispatch to make the first push (an empty repo is handled: the workflow pushes to `main`).
+2. Create a fine-grained personal access token (Settings, Developer settings): resource owner `web-locks`, repository access limited to `web-locks/web-locks.github.io`, permission Contents: read and write. Set an expiry and calendar the renewal.
+3. On `web-locks/web-locks`: Settings, Secrets and variables, Actions, new secret `PAGES_DEPLOY_TOKEN` with the token value.
+4. On `web-locks/web-locks.github.io`: Settings, Pages, deploy from branch, the default branch (`main`), folder `/ (root)`.
+5. Run the "Deploy sites" workflow via workflow_dispatch to make the first push (an empty repo is handled: the workflow pushes to `main`).
 
 ## First-release checklist
 
 - [ ] Packages are at `0.0.0`; `vp run release` and choose `0.1.0`.
-- [ ] `NPM_TOKEN` (or trusted publishing) and `PAGES_DEPLOY_KEY` are set; the `@web-locks` npm scope exists and you own it.
-- [ ] `web-locks.github.io` exists, deploy key added, Pages enabled.
+- [ ] `NPM_TOKEN` (or trusted publishing) and `PAGES_DEPLOY_TOKEN` are set; the `@web-locks` npm scope exists and you own it.
+- [ ] `web-locks.github.io` exists, token secret added, Pages enabled.
 - [ ] `vp pm publish -r --dry-run --no-git-checks --access public` lists only `@web-locks/core` and `@web-locks/react`.
 - [ ] Do the first release as a dry run (the release workflow's publish step with `--dry-run`, e.g. on a fork or throwaway tag) and verify that the `registry-url` input of `setup-vp` writes the npm auth config (an `.npmrc` using `NODE_AUTH_TOKEN`); without it the real publish fails with `ENEEDAUTH`.
 - [ ] After release: check the npm pages show the provenance badge and the site loads at `/`, `/react/`, `/vanilla/`.
@@ -52,7 +51,6 @@ Hardening (recommended):
 - "tag does not match packages/core version": the tag was created by hand or the bump commit is missing. Delete the tag (`git push --delete origin vX.Y.Z`), fix, retag.
 - `E403`/`E404` on publish: token lacks rights to the `@web-locks` scope, or the scope does not exist.
 - Provenance error: requires GitHub-hosted runners and `id-token: write`; it cannot work from a local machine.
-- Deploy fails with a host key error: GitHub may have rotated its key. Check `ssh_keys` at https://api.github.com/meta and GitHub's SSH key fingerprints doc page before changing the pinned key in `deploy-sites.yml`.
-- Deploy `Permission denied (publickey)`: the secret holds the wrong half, lost its trailing newline, or the deploy key is read-only.
+- Deploy fails with a 403 or "Permission denied": `PAGES_DEPLOY_TOKEN` is missing, expired, or lacks Contents read/write on `web-locks.github.io`.
 - Pages shows nothing: confirm Pages is on for the default branch and that `.nojekyll` is in the site repo root.
 - Preview the Pages tree locally: `vp run -r build && scripts/assemble-site.sh`, then inspect `site/`.
