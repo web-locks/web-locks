@@ -4,9 +4,7 @@ on:
   push:
     tags: ["v*"]
 
-permissions:
-  contents: read
-  id-token: write # npm provenance
+permissions: {}
 
 concurrency:
   group: release
@@ -15,29 +13,45 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm provenance
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: voidzero-dev/setup-vp@56918a6d0c629c55ae8b88826a7d47fda85769ee # v1.9.0
         with:
           node-version: "24"
-          cache: true
+          cache: false # no cache in a publishing workflow (poisoning vector)
           registry-url: "https://registry.npmjs.org"
-      - name: Verify tag matches package version
+      - name: Verify tag is on main and matches package versions
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          version="$(node -p "require('./packages/core/package.json').version")"
-          if [ "$TAG" != "v$version" ]; then
-            echo "::error::tag $TAG does not match packages/core version v$version"; exit 1
+          set -euo pipefail
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::tagged commit is not on main"; exit 1
           fi
+          for pkg in core react; do
+            version="$(node -p "require('./packages/$pkg/package.json').version")"
+            if [ "$TAG" != "v$version" ]; then
+              echo "::error::tag $TAG does not match packages/$pkg version v$version"; exit 1
+            fi
+          done
       - run: vp check
       - run: vp run -r test
       - run: vp run -r build
       # vp is the only guaranteed tool; `vp pm` forwards to the pinned pnpm.
       # Private packages are skipped; pnpm publishes in topological order (core before react).
       - name: Publish
-        run: vp pm publish -r --access public --provenance --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./packages/core/package.json').version")"
+          tag=latest
+          case "$version" in *-*) tag=next ;; esac
+          vp pm publish -r --access public --provenance --no-git-checks --tag "$tag"

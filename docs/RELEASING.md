@@ -19,7 +19,15 @@ All packages in the workspace share one version (lockstep). Releases are cut by 
 | `NPM_TOKEN`        | npm automation or granular access token with publish rights to the `@web-locks` scope. |
 | `PAGES_DEPLOY_KEY` | Private half of a write-enabled deploy key for `web-locks/web-locks.github.io`.        |
 
-Recommended alternative for npm: configure trusted publishing (OIDC) for both packages on npmjs.com, pointing at this repository and `release.yml`. Then `NPM_TOKEN` can be dropped; provenance is attached automatically and the workflow's `id-token: write` permission is already in place (needs npm CLI >= 11.5.1).
+Recommended alternative for npm: configure trusted publishing (OIDC) for both packages on npmjs.com, pointing at this repository and `release.yml`. Then `NPM_TOKEN` can be dropped; provenance is attached automatically and the workflow's `id-token: write` permission is already in place (verify that the pinned pnpm, run through `vp pm`, supports OIDC trusted publishing before relying on it; npm itself needs CLI >= 11.5.1).
+
+Provenance requires the source repository `web-locks/web-locks` to be public.
+
+Hardening (recommended):
+
+- Add a tag ruleset restricting who can create `v*` tags. `release.yml` also refuses to publish a tag whose commit is not an ancestor of `origin/main`.
+- Move `NPM_TOKEN` into a GitHub Environment (for example `npm`) restricted to `v*` tags, optionally with required reviewers. The workflow does not use an Environment yet: create it first, then add `environment: npm` to the `release` job.
+- Versions containing `-` (for example `0.2.0-beta.1`) publish under the `next` dist-tag; others under `latest`.
 
 ## One-time Pages setup
 
@@ -43,7 +51,7 @@ Recommended alternative for npm: configure trusted publishing (OIDC) for both pa
 - "tag does not match packages/core version": the tag was created by hand or the bump commit is missing. Delete the tag (`git push --delete origin vX.Y.Z`), fix, retag.
 - `E403`/`E404` on publish: token lacks rights to the `@web-locks` scope, or the scope does not exist.
 - Provenance error: requires GitHub-hosted runners and `id-token: write`; it cannot work from a local machine.
-- Deploy "host key fingerprint mismatch": compare with GitHub's published SSH fingerprints before changing the pinned value in `deploy-sites.yml`.
+- Deploy fails with a host key error: GitHub may have rotated its key. Check `ssh_keys` at https://api.github.com/meta and GitHub's SSH key fingerprints doc page before changing the pinned key in `deploy-sites.yml`.
 - Deploy `Permission denied (publickey)`: the secret holds the wrong half, lost its trailing newline, or the deploy key is read-only.
 - Pages shows nothing: confirm Pages is on for the default branch and that `.nojekyll` is in the site repo root.
 - Preview the Pages tree locally: `vp run -r build && scripts/assemble-site.sh`, then inspect `site/`.

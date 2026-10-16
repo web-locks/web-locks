@@ -18,6 +18,7 @@ env:
 
 jobs:
   deploy:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -47,24 +48,22 @@ jobs:
           printf '%s\n' "$PAGES_DEPLOY_KEY" > "$ssh_dir/id"
           chmod 600 "$ssh_dir/id"
 
-          # Pin github.com's ed25519 host key, verified against GitHub's published
-          # fingerprint (https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints).
-          ssh-keyscan -t ed25519 github.com > "$ssh_dir/known_hosts" 2>/dev/null
-          expected='SHA256:+DzY3nMYvMCMN2L/YWwyP3o3yFW2RHxHKlwf5Q+J9is'
-          actual="$(ssh-keygen -lf "$ssh_dir/known_hosts" | awk '{print $2}')"
-          if [ "$actual" != "$expected" ]; then
-            echo "::error::github.com host key fingerprint mismatch (got $actual)"; exit 1
-          fi
-          export GIT_SSH_COMMAND="ssh -i $ssh_dir/id -o IdentitiesOnly=yes -o UserKnownHostsFile=$ssh_dir/known_hosts -o StrictHostKeyChecking=yes"
+          # github.com ed25519 host key, from https://api.github.com/meta (ssh_keys).
+          # Fingerprint SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU
+          # (https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints).
+          # Re-verify when GitHub rotates its keys.
+          echo 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' > "$ssh_dir/known_hosts"
+          export GIT_SSH_COMMAND="ssh -i '$ssh_dir/id' -o IdentitiesOnly=yes -o UserKnownHostsFile='$ssh_dir/known_hosts' -o StrictHostKeyChecking=yes"
 
           work="$RUNNER_TEMP/site-repo"
           rm -rf "$work"
           git clone --depth 1 "$SITE_REPO" "$work" || {
-            # First push into a freshly created, empty repo: clone may fail or warn.
-            echo "clone failed; is the repository created and the deploy key added?" >&2
+            # Cloning an empty repo only warns; a failure here is a real one.
+            echo "::error::clone failed; check the repository exists and the deploy key is added"
             exit 1
           }
           cd "$work"
+          git checkout -B main
 
           # Replace everything except .git with the freshly assembled site.
           find . -mindepth 1 -maxdepth 1 -not -name .git -exec rm -rf {} +
@@ -78,12 +77,7 @@ jobs:
             exit 0
           fi
           git commit -m "deploy: ${SRC_SHA:0:7}"
-          # Empty repo has no default branch yet: push HEAD to main in that case.
-          if git rev-parse --abbrev-ref HEAD | grep -qx HEAD; then
-            git push origin HEAD:main
-          else
-            git push origin "HEAD:$(git rev-parse --abbrev-ref HEAD)"
-          fi
+          git push origin HEAD:main
       - name: Remove deploy key
         if: always()
         run: rm -rf "$RUNNER_TEMP/pages-ssh" "$RUNNER_TEMP/site-repo"

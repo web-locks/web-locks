@@ -54,7 +54,6 @@
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@web-locks/fake-locks": "workspace:*",
-    "bumpp": "^12.3.0",
     "jsdom": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
