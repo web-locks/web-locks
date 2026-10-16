@@ -90,7 +90,7 @@ describe("useLock", () => {
     await tick();
     expect(locks.heldNames()).toEqual([]);
     expect((await locks.query()).pending).toEqual([]);
-    expect(request.mock.calls.length).toBeLessThanOrEqual(1);
+    expect(request).not.toHaveBeenCalled();
   });
 
   it("two hooks on one name: second pends until the first unmounts", async () => {
@@ -143,11 +143,15 @@ describe("useLock", () => {
 
   it("stolen lock shows idle", async () => {
     const locks = new FakeLockManager();
-    const { result } = renderHook(() => useLock("res", { locks }));
+    const onLost = vi.fn();
+    const { result } = renderHook(() => useLock("res", { locks, onLost }));
     await tick();
     expect(result.current.status).toBe("held");
     // Another context steals the lock.
     void locks.request("res", { steal: true }, () => new Promise<void>(() => {}));
+    await tick();
+    expect(result.current.status).toBe("idle");
+    expect(onLost).toHaveBeenCalledTimes(1);
     await tick();
     expect(result.current.status).toBe("idle");
   });
@@ -161,6 +165,72 @@ describe("useLock", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it("signal is not an accepted option", () => {
+    const locks = new FakeLockManager();
+    renderHook(() =>
+      // @ts-expect-error signal is not part of UseLockOptions
+      useLock("res", { locks, signal: new AbortController().signal }),
+    );
+  });
+
+  it("StrictMode with ifAvailable holds exactly one lock", async () => {
+    const locks = new FakeLockManager();
+    const { result } = renderHook(() => useLock("res", { locks, ifAvailable: true }), {
+      wrapper: StrictMode,
+    });
+    await tick();
+    expect(result.current.status).toBe("held");
+    expect(locks.heldNames().length).toBe(1);
+  });
+
+  it("StrictMode with steal holds exactly one lock and never loses it", async () => {
+    const locks = new FakeLockManager();
+    const onLost = vi.fn();
+    const { result } = renderHook(() => useLock("res", { locks, steal: true, onLost }), {
+      wrapper: StrictMode,
+    });
+    await tick();
+    expect(result.current.status).toBe("held");
+    expect(locks.heldNames().length).toBe(1);
+    expect(onLost).not.toHaveBeenCalled();
+  });
+
+  it("release() then a dependency change re-acquires", async () => {
+    const locks = new FakeLockManager();
+    const { result, rerender } = renderHook(({ mode }) => useLock("res", { locks, mode }), {
+      initialProps: { mode: "exclusive" as LockMode },
+    });
+    await tick();
+    await act(async () => {
+      await result.current.release();
+    });
+    expect(result.current.status).toBe("idle");
+    rerender({ mode: "shared" });
+    await tick();
+    expect(result.current.status).toBe("held");
+    expect(locks.heldNames()).toEqual(["res"]);
+  });
+
+  it("option change with ifAvailable never sees its own old lock", async () => {
+    const locks = new FakeLockManager();
+    const seen: string[] = [];
+    const { result, rerender } = renderHook(
+      ({ mode }) => {
+        const r = useLock("res", { locks, ifAvailable: true, mode });
+        seen.push(r.status);
+        return r;
+      },
+      { initialProps: { mode: "exclusive" as LockMode } },
+    );
+    await tick();
+    expect(result.current.status).toBe("held");
+    rerender({ mode: "shared" });
+    await tick();
+    expect(result.current.status).toBe("held");
+    expect(seen).not.toContain("unavailable");
+    expect(locks.heldNames()).toEqual(["res"]);
   });
 
   it('renders "idle" via renderToString', () => {

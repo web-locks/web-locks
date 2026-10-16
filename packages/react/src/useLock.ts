@@ -2,7 +2,7 @@ import { createLockStatus } from "@web-locks/core";
 import type { LockState, LockStatusOptions } from "@web-locks/core";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
-export type UseLockOptions = LockStatusOptions & {
+export type UseLockOptions = Omit<LockStatusOptions, "signal"> & {
   /** Set to false to release (and not acquire) the lock. Defaults to true. */
   enabled?: boolean;
 };
@@ -41,20 +41,23 @@ function createStateStore() {
  * acquisition starts after mount ("pending", then "held", "unavailable" with
  * `ifAvailable`, or "unsupported" without the Locks API). The lock is released
  * on unmount, when `enabled` becomes false, and when `name`, `mode`,
- * `ifAvailable`, `steal`, `locks` or `signal` change (then it is re-acquired).
+ * `ifAvailable`, `steal` or `locks` change (then it is re-acquired, after the
+ * previous lock has been fully released). A lock stolen from this component is
+ * NOT re-acquired automatically: `status` becomes "idle" and `onLost` runs.
  *
  * `release()` frees the held lock now and returns the status to "idle". It does
  * not re-acquire on the next render: the lock is acquired again only when the
  * name/options above change or the component remounts. Callbacks
  * (`onAcquired`, `onLost`) live in refs, so changing them never re-acquires.
- * Passing a `signal` disables the internal abort-on-release of a queued
- * request; `locks` should be referentially stable.
+ * Queued requests are aborted by the hook itself on unmount (there is no
+ * `signal` option); `ifAvailable` and `steal` requests never queue. `locks`
+ * should be referentially stable.
  */
 export function useLock(
   name: string,
   options: UseLockOptions = {},
 ): { status: LockState; release(): Promise<void> } {
-  const { enabled = true, mode, ifAvailable, steal, signal, locks } = options;
+  const { enabled = true, mode, ifAvailable, steal, locks } = options;
   const [store] = useState(createStateStore);
 
   // Callbacks live in refs so changing them never re-acquires.
@@ -62,6 +65,12 @@ export function useLock(
   useEffect(() => {
     callbacks.current = options;
   });
+
+  // Each effect run creates its own core status, which serializes only within
+  // itself. This promise chains the previous runs' releases so the next run
+  // waits until the old lock is truly free before requesting (otherwise an
+  // `ifAvailable` request could see this hook's own old lock). Never rejects.
+  const previousRelease = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
     if (!enabled) {
@@ -72,24 +81,31 @@ export function useLock(
       mode,
       ifAvailable,
       steal,
-      signal,
       locks,
       onAcquired: () => callbacks.current.onAcquired?.(),
       onLost: () => callbacks.current.onLost?.(),
     });
     store.attach(status);
+    let cancelled = false;
+    let unsubscribe = () => {};
     const sync = () => store.set(status.getState());
-    const unsubscribe = status.subscribe(sync);
-    status.start();
-    sync();
+    store.set("pending");
+    void previousRelease.current.then(() => {
+      if (cancelled) return;
+      unsubscribe = status.subscribe(sync);
+      status.start();
+      sync();
+    });
     return () => {
+      cancelled = true;
       unsubscribe();
       store.attach(null);
-      // release() is async; the core serializes it against later start() calls.
-      void status.release();
+      // release() is async; chain it so the next effect run waits for it.
+      const released = status.release().catch(() => {});
+      previousRelease.current = Promise.all([previousRelease.current, released]).then(() => {});
       store.set("idle");
     };
-  }, [name, mode, ifAvailable, steal, signal, locks, enabled, store]);
+  }, [name, mode, ifAvailable, steal, locks, enabled, store]);
 
   const status = useSyncExternalStore(store.subscribe, store.getState, () => "idle" as LockState);
   const release = useCallback(() => store.release(), [store]);
