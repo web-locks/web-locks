@@ -2,8 +2,10 @@
   "compilerOptions": {
     "target": "es2023",
     "module": "esnext",
-    "lib": ["ES2023", "DOM"],
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": ["vite/client"],
+    "jsx": "react-jsx",
+    "strict": true,
     "allowArbitraryExtensions": true,
     "skipLibCheck": true,
 
@@ -13,6 +15,10 @@
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
     "noEmit": true,
+    "paths": {
+      "@web-locks/core": ["../../packages/core/src/index.ts"],
+      "@web-locks/react": ["../../packages/react/src/index.ts"]
+    },
 
     /* Linting */
     "noUnusedLocals": true,
@@ -20,5 +26,5 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": ["src", "tests"]
 }
