@@ -85,7 +85,7 @@ Say your app talks to a web service through a client object that registers itsel
 - `onPromoted` restores the snapshot if it is readable, current-version and recent, and otherwise registers a new client.
 - The leader also posts each snapshot on a `BroadcastChannel`, so standby tabs can show the live state without owning a client.
 
-Two failure modes to design for. The hooks swallow errors thrown by your callbacks, so a throw in `onPromoted` would leave this tab holding the lock with no client; the sample steps down (`enabled: false`) instead, so another tab can take over. And storage can throw (quota, private mode) or hold data from an older app version, so every read and write is guarded and snapshots are versioned and expire.
+Two failure modes to design for. The hooks swallow errors thrown by your callbacks, so a throw in `onPromoted` would leave this tab holding the lock with no client; the sample steps down (`stopped`, which sets `enabled: false`) instead, so another tab can take over. And storage can throw (quota, private mode) or hold data from an older app version, so every read and write is guarded, and snapshots are versioned and expire. `MAX_SNAPSHOT_AGE_MS` must be no higher than your service's session lifetime, or a tab could restore a session the service has already expired.
 
 ```tsx
 import { useEffect, useRef, useState } from "react";
@@ -100,7 +100,7 @@ import { ApiClient, type Snapshot } from "./api-client";
 
 const KEY = "api-client";
 const VERSION = 1; // bump when the Snapshot shape changes
-const MAX_SNAPSHOT_AGE_MS = 5 * 60_000;
+const MAX_SNAPSHOT_AGE_MS = 5 * 60_000; // keep <= the service's session lifetime
 const SNAPSHOT_INTERVAL_MS = 10_000;
 
 type Saved = { v: number; savedAt: number; data: Snapshot };
@@ -116,25 +116,52 @@ function readSaved(): Snapshot | null {
   }
 }
 
+function openChannel(): BroadcastChannel | null {
+  try {
+    return typeof BroadcastChannel === "undefined" ? null : new BroadcastChannel(KEY);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Never throws. If any part fails (storage, BroadcastChannel, the client's
+ * own snapshot), the tab keeps running without that part of the handoff
+ * rather than failing: autosave is best effort. Returns the cleanup.
+ */
 function startAutosave(client: ApiClient): () => void {
-  const channel = new BroadcastChannel(KEY);
+  const channel = openChannel();
   const persist = () => {
-    const data = client.snapshot();
+    let data: Snapshot;
+    try {
+      data = client.snapshot();
+    } catch {
+      return;
+    }
+    try {
+      channel?.postMessage(data);
+    } catch {
+      // standby tabs miss one update
+    }
     try {
       localStorage.setItem(KEY, JSON.stringify({ v: VERSION, savedAt: Date.now(), data }));
     } catch {
-      // storage full or unavailable: keep running, just without crash recovery
+      // storage full or unavailable: no crash recovery for this snapshot
     }
-    channel.postMessage(data);
   };
-  const stopListening = client.onChange(persist); // every state change
+  let stopListening = () => {};
+  try {
+    stopListening = client.onChange(persist); // every state change
+  } catch {
+    // the timer below still covers it
+  }
   const timer = setInterval(persist, SNAPSHOT_INTERVAL_MS); // crash recovery
   persist();
   return () => {
     stopListening();
     clearInterval(timer);
     persist(); // final snapshot, taken before the lock is released
-    channel.close();
+    channel?.close();
   };
 }
 
@@ -142,12 +169,12 @@ export function useSharedClient() {
   const client = useRef<ApiClient | null>(null);
   const stopAutosave = useRef<(() => void) | null>(null);
   const [mirror, setMirror] = useState<Snapshot | null>(null);
-  const [failed, setFailed] = useState(false);
+  const [stopped, setStopped] = useState(false);
 
   const state = useLeader("api-client", {
     // If startup fails, step down so another tab can try. A leader that holds
     // the lock without a client is the one outcome to avoid.
-    enabled: !failed,
+    enabled: !stopped,
     async onPromoted() {
       try {
         const saved = readSaved();
@@ -156,7 +183,7 @@ export function useSharedClient() {
         try {
           client.current = await ApiClient.register(); // restore failed: start fresh
         } catch {
-          return setFailed(true); // could not get a client at all
+          return setStopped(true); // could not get a client at all
         }
       }
       stopAutosave.current = startAutosave(client.current);
@@ -172,16 +199,44 @@ export function useSharedClient() {
   // Standby tabs mirror the leader's latest snapshot, starting from storage.
   useEffect(() => {
     setMirror(readSaved());
-    const channel = new BroadcastChannel(KEY);
-    channel.onmessage = (event: MessageEvent<Snapshot>) => setMirror(event.data);
-    return () => channel.close();
+    const channel = openChannel();
+    if (channel)
+      channel.onmessage = (event: MessageEvent<Snapshot | null>) => setMirror(event.data);
+    return () => channel?.close();
   }, []);
 
-  return { state, mirror, getClient: () => client.current };
+  /** Leader only: end the session. Autosave stops BEFORE the key is cleared. */
+  function signOut() {
+    stopAutosave.current?.(); // autosave rewrites the key on a timer and on every change
+    stopAutosave.current = null;
+    client.current?.close();
+    client.current = null;
+    try {
+      localStorage.removeItem(KEY);
+    } catch {
+      // nothing stored, or storage unavailable
+    }
+    const channel = openChannel();
+    channel?.postMessage(null); // standby tabs drop their mirror
+    channel?.close();
+    setStopped(true); // step down so another tab can start a fresh session
+  }
+
+  return {
+    state,
+    mirror,
+    stopped,
+    getClient: () => client.current,
+    signOut,
+    // `stopped` is never reset on its own: a failed register() leaves this tab
+    // out of the election until you call retry() (for example from a button)
+    // or reload.
+    retry: () => setStopped(false),
+  };
 }
 ```
 
-The leader owns `getClient()`; every other tab reads `mirror`. A snapshot restored after a crash can be up to one interval old, so choose the interval to match how much your client can lose. Remove the `api-client` key from `localStorage` on logout, so the next user never restores someone else's session. A reusable version of this pattern is planned for `@web-locks/react-extras`.
+The leader owns `getClient()`; every other tab reads `mirror`. A snapshot restored after a crash can be up to one interval old, so choose the interval to match how much your client can lose. If `register()` fails, the tab stays down (`stopped` is `true`) until `retry()` or a reload; wire `retry` to a button, e.g. `<button onClick={retry}>Retry</button>`. On logout, always stop the leader's autosave first (as `signOut` does, by closing the client and stepping down), then clear the `api-client` key: autosave would otherwise rewrite it, and the next user could restore someone else's session. A reusable version of this pattern is planned for `@web-locks/react-extras`.
 
 ## API reference
 
