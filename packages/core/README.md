@@ -76,7 +76,7 @@ await status.release();
 ```ts
 import { queryLocks } from "@web-locks/core";
 
-const { held, pending } = await queryLocks();
+const { held = [], pending = [] } = await queryLocks();
 console.log(
   held.map((lock) => lock.name),
   pending.length,
@@ -101,7 +101,7 @@ Every function accepts an optional `locks` (a `LocksLike`, i.e. `Pick<LockManage
 
 ### `queryLocks(locks?: LocksLike): Promise<LockManagerSnapshot>`
 
-Resolves `navigator.locks.query()`: `{ held, pending }`. Resolves `{ held: [], pending: [] }` when unsupported.
+Resolves `navigator.locks.query()`: `{ held?, pending? }` (both fields are optional in the DOM type, so default them). Resolves `{ held: [], pending: [] }` when unsupported.
 
 ### `acquireLock(name: string, options?: AcquireOptions): Promise<LockHandle | null>`
 
@@ -118,7 +118,7 @@ Requests the lock `name` and resolves a handle once it is granted.
 
 Resolves `null` when the API is unsupported or when `ifAvailable` finds the lock taken. A `LockHandle` has `name` and `release(): Promise<void>`; `release()` is idempotent and resolves once the underlying request has finished.
 
-### `createLockStatus(name: string, options?: LockStatusOptions): ReturnType<typeof createLockStatus>`
+### `createLockStatus(name: string, options?: LockStatusOptions): Store<LockState> & { start(): void; release(): Promise<void> }`
 
 Tracks one lock's lifecycle. Takes every `acquireLock` option plus `onAcquired?: () => void` (called each time the lock is acquired; errors are swallowed). Returns a `Store<LockState>` (`getState()`, `subscribe(listener)`; compatible with `useSyncExternalStore`) plus:
 
