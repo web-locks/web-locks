@@ -62,6 +62,8 @@ describe("createLockStatus", () => {
     const s = createLockStatus("x", { locks });
     s.start();
     expect(s.getState()).toBe("pending");
+    await tick();
+    expect((await locks.query()).pending).toHaveLength(1);
     const p = s.release();
     expect(s.getState()).toBe("idle");
     await tick();
@@ -78,6 +80,8 @@ describe("createLockStatus", () => {
     const holder = await acquireLock("x", { locks });
     const s = createLockStatus("x", { locks, signal: new AbortController().signal });
     s.start();
+    await tick();
+    expect((await locks.query()).pending).toHaveLength(1);
     const p = s.release();
     await holder!.release();
     await p;
@@ -91,9 +95,14 @@ describe("createLockStatus", () => {
     const holder = await acquireLock("x", { locks });
     const s = createLockStatus("x", { locks, signal: new AbortController().signal });
     s.start();
+    await tick();
     void s.release();
     s.start();
+    await tick();
+    expect(s.getState()).toBe("pending");
+    expect(locks.heldNames()).toEqual(["x"]);
     await holder!.release();
+    await tick();
     await tick();
     expect(s.getState()).toBe("held");
     expect(locks.heldNames()).toEqual(["x"]);
@@ -168,5 +177,37 @@ describe("createLockStatus", () => {
     await tick();
     expect(s.getState()).toBe("idle");
     expect(locks.heldNames()).toEqual([]);
+  });
+
+  it("start, grant, release, start with ifAvailable ends held", async () => {
+    const locks = new FakeLockManager();
+    const s = createLockStatus("x", { locks, ifAvailable: true });
+    s.start();
+    await tick();
+    expect(s.getState()).toBe("held");
+    void s.release();
+    s.start();
+    await tick();
+    await tick();
+    expect(s.getState()).toBe("held");
+    expect(locks.heldNames()).toEqual(["x"]);
+    await s.release();
+    expect(locks.heldNames()).toEqual([]);
+  });
+
+  it("start, grant, release, start with steal never fires onLost", async () => {
+    const locks = new FakeLockManager();
+    const onLost = vi.fn();
+    const s = createLockStatus("x", { locks, steal: true, onLost });
+    s.start();
+    await tick();
+    expect(s.getState()).toBe("held");
+    void s.release();
+    s.start();
+    await tick();
+    await tick();
+    expect(s.getState()).toBe("held");
+    expect(onLost).not.toHaveBeenCalled();
+    await s.release();
   });
 });

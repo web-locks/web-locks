@@ -11,6 +11,11 @@ export type LockStatusOptions = AcquireOptions & {
 /**
  * A small store tracking one lock's lifecycle:
  * `idle` -> `pending` -> `held` | `unavailable` | `unsupported`.
+ *
+ * A `start()` issued after `release()` waits for the earlier acquisition to
+ * finish. If that earlier request was queued with a caller-supplied `signal`
+ * (so the store cannot abort it), the new start stays `pending` until that
+ * request settles.
  */
 export function createLockStatus(
   name: string,
