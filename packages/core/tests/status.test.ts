@@ -1,5 +1,6 @@
 import { FakeLockManager } from "@web-locks/fake-locks";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { acquireLock } from "../src/lock.ts";
 import { createLockStatus } from "../src/status.ts";
 
 afterEach(() => {
@@ -36,7 +37,7 @@ describe("createLockStatus", () => {
 
   it("ifAvailable lost -> unavailable", async () => {
     const locks = new FakeLockManager();
-    const holder = await (await import("../src/lock.ts")).acquireLock("x", { locks });
+    const holder = await acquireLock("x", { locks });
     const onAcquired = vi.fn();
     const s = createLockStatus("x", { locks, ifAvailable: true, onAcquired });
     s.start();
@@ -57,13 +58,14 @@ describe("createLockStatus", () => {
 
   it("release during pending releases the late grant (ifAvailable-free, aborts queue)", async () => {
     const locks = new FakeLockManager();
-    const { acquireLock } = await import("../src/lock.ts");
     const holder = await acquireLock("x", { locks });
     const s = createLockStatus("x", { locks });
     s.start();
     expect(s.getState()).toBe("pending");
     const p = s.release();
     expect(s.getState()).toBe("idle");
+    await tick();
+    expect((await locks.query()).pending).toEqual([]);
     await holder!.release();
     await p;
     await tick();
@@ -73,7 +75,6 @@ describe("createLockStatus", () => {
 
   it("release during pending releases the late grant when caller supplied a signal", async () => {
     const locks = new FakeLockManager();
-    const { acquireLock } = await import("../src/lock.ts");
     const holder = await acquireLock("x", { locks });
     const s = createLockStatus("x", { locks, signal: new AbortController().signal });
     s.start();
@@ -87,7 +88,6 @@ describe("createLockStatus", () => {
 
   it("stale grant does not affect a restarted store", async () => {
     const locks = new FakeLockManager();
-    const { acquireLock } = await import("../src/lock.ts");
     const holder = await acquireLock("x", { locks });
     const s = createLockStatus("x", { locks, signal: new AbortController().signal });
     s.start();
@@ -103,7 +103,6 @@ describe("createLockStatus", () => {
 
   it("stolen lock returns to idle and calls user onLost", async () => {
     const locks = new FakeLockManager();
-    const { acquireLock } = await import("../src/lock.ts");
     const onLost = vi.fn(() => {
       throw new Error("boom");
     });
@@ -129,5 +128,45 @@ describe("createLockStatus", () => {
     expect(s.getState()).toBe("held");
     expect(onAcquired).toHaveBeenCalledTimes(1);
     await s.release();
+  });
+
+  it("start, release, start with ifAvailable ends held", async () => {
+    const locks = new FakeLockManager();
+    const s = createLockStatus("x", { locks, ifAvailable: true });
+    s.start();
+    void s.release();
+    s.start();
+    expect(s.getState()).toBe("pending");
+    await tick();
+    await tick();
+    expect(s.getState()).toBe("held");
+    await s.release();
+    expect(locks.heldNames()).toEqual([]);
+  });
+
+  it("start, release, start with steal does not fire onLost for the stale acquisition", async () => {
+    const locks = new FakeLockManager();
+    const onLost = vi.fn();
+    const s = createLockStatus("x", { locks, steal: true, onLost });
+    s.start();
+    void s.release();
+    s.start();
+    await tick();
+    await tick();
+    expect(s.getState()).toBe("held");
+    expect(onLost).not.toHaveBeenCalled();
+    await s.release();
+  });
+
+  it("start, release, release before the second request is issued never acquires", async () => {
+    const locks = new FakeLockManager();
+    const s = createLockStatus("x", { locks, ifAvailable: true });
+    s.start();
+    void s.release();
+    s.start();
+    await s.release();
+    await tick();
+    expect(s.getState()).toBe("idle");
+    expect(locks.heldNames()).toEqual([]);
   });
 });

@@ -40,54 +40,56 @@ export function createLockStatus(
     const canAbort = !rest.signal && !rest.ifAvailable && !rest.steal;
     abort = canAbort ? new AbortController() : null;
     set("pending");
-    inflight = acquireLock(name, {
-      ...rest,
-      signal: abort ? abort.signal : rest.signal,
-      onLost: () => {
-        if (id === run) {
+    const signal = abort ? abort.signal : rest.signal;
+    // Serialize: wait until any earlier run has fully finished (request settled,
+    // handle released) before issuing our own request.
+    inflight = inflight.then(() => {
+      if (id !== run) return;
+      return acquireLock(name, {
+        ...rest,
+        signal,
+        onLost: () => {
+          if (id !== run) return;
           handle = null;
           set("idle");
-        }
-        try {
-          onLost?.();
-        } catch {
-          // ignore
-        }
-      },
-    }).then(
-      (h) => {
-        if (id !== run) {
-          void h?.release();
-          return;
-        }
-        if (!h) {
-          set("unavailable");
-          return;
-        }
-        handle = h;
-        set("held");
-        try {
-          onAcquired?.();
-        } catch {
-          // ignore
-        }
-      },
-      () => {
-        // AbortError from our own abort, or any other failure: back to idle.
-        if (id === run) set("idle");
-      },
-    );
+          try {
+            onLost?.();
+          } catch {
+            // ignore
+          }
+        },
+      }).then(
+        (h) => {
+          if (id !== run) return h?.release();
+          if (!h) {
+            set("unavailable");
+            return;
+          }
+          handle = h;
+          set("held");
+          try {
+            onAcquired?.();
+          } catch {
+            // ignore
+          }
+        },
+        () => {
+          // AbortError from our own abort, or any other failure: back to idle.
+          if (id === run) set("idle");
+        },
+      );
+    });
   }
 
   function release(): Promise<void> {
     run++;
     const h = handle;
-    const pending = inflight;
     handle = null;
     abort?.abort();
     abort = null;
     set("idle");
-    return Promise.all([pending, h?.release()]).then(() => {});
+    inflight = Promise.all([inflight, h?.release()]).then(() => {});
+    return inflight;
   }
 
   return {
