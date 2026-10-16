@@ -448,7 +448,8 @@ describe("createLeader", () => {
     expect(locks.heldNames()).toEqual([]);
   });
 
-  it("hooks are optional and errors without onError are swallowed", async () => {
+  it("hooks are optional and errors without onError go to console.error", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     const locks = new FakeLockManager();
     const leader = createLeader({ name: NAME, locks });
     leader.start();
@@ -468,8 +469,11 @@ describe("createLeader", () => {
     throwing.start();
     await flush();
     expect(throwing.getState()).toBe("leader");
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    expect(consoleError.mock.calls[0]![0]).toMatchObject({ message: "x" });
     await throwing.stop();
     expect(locks.heldNames()).toEqual([]);
+    consoleError.mockRestore();
   });
 
   it("retries a failed lock request after 1s and reports it to onError", async () => {
@@ -575,5 +579,282 @@ describe("createLeader", () => {
     expect(tab.getState()).toBe("leader");
     await tab.stop();
     expect(listeners.size).toBe(0);
+  });
+});
+
+describe("createLeader with a stolen lock", () => {
+  const trackUnhandled = () => {
+    const unhandled: unknown[] = [];
+    const listener = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", listener);
+    return { unhandled, dispose: () => process.off("unhandledRejection", listener) };
+  };
+
+  /** Steals NAME and holds it until the returned release() is called. */
+  const steal = (locks: LocksLike) => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let granted = false;
+    const done = locks.request(NAME, { steal: true }, async () => {
+      granted = true;
+      await held;
+    });
+    return { done, release, granted: () => granted };
+  };
+
+  it("a stolen leader is demoted once, then re-queues and leads again", async () => {
+    const tracker = trackUnhandled();
+    try {
+      const locks = new FakeLockManager();
+      const log: string[] = [];
+      const onError = vi.fn();
+      const a = makeTab("A", locks, log, { onError });
+      a.leader.start();
+      await flush();
+      expect(a.leadership()).toBe("leader");
+
+      const thief = steal(locks);
+      await flush();
+      expect(thief.granted()).toBe(true);
+      expect(log).toEqual(["A:promoted", "A:demoted"]);
+      expect(a.leadership()).toBe("standby");
+      expect((await locks.query()).pending).toHaveLength(1); // A queued behind the thief
+      expect(onError).not.toHaveBeenCalled();
+
+      thief.release();
+      await thief.done;
+      await flush();
+      expect(log).toEqual(["A:promoted", "A:demoted", "A:promoted"]);
+      expect(a.leadership()).toBe("leader");
+      expect(a.states).toEqual(["leader", "standby", "leader"]);
+
+      await a.leader.stop();
+      expect(log).toEqual(["A:promoted", "A:demoted", "A:promoted", "A:demoted"]);
+      expect(a.leadership()).toBe("pending");
+      expect(locks.heldNames()).toEqual([]);
+      expect((await locks.query()).pending).toEqual([]);
+      await flush();
+      expect(tracker.unhandled).toEqual([]);
+      expect(onError).not.toHaveBeenCalled();
+    } finally {
+      tracker.dispose();
+    }
+  });
+
+  it("onDemoted of a stolen leader finishes before it re-queues", async () => {
+    const locks = new FakeLockManager();
+    const log: string[] = [];
+    const a = makeTab("A", locks, log, { demoteDelayMs: 20 });
+    a.leader.start();
+    await flush();
+    const thief = steal(locks);
+    await flush();
+    expect(log).toEqual(["A:promoted"]); // still demoting
+    expect((await locks.query()).pending).toEqual([]); // not re-queued yet
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    await flush();
+    expect(log).toEqual(["A:promoted", "A:demoted"]);
+    expect((await locks.query()).pending).toHaveLength(1);
+    thief.release();
+    await flush();
+    expect(a.leadership()).toBe("leader");
+    await a.leader.stop();
+    expect(locks.heldNames()).toEqual([]);
+  });
+
+  it("stop() while the stolen lock is held elsewhere resolves and leaves nothing behind", async () => {
+    const tracker = trackUnhandled();
+    try {
+      const locks = new FakeLockManager();
+      const log: string[] = [];
+      const a = makeTab("A", locks, log);
+      const b = makeTab("B", locks, log);
+      a.leader.start();
+      await flush();
+      b.leader.start();
+      await flush();
+      expect(b.leadership()).toBe("standby");
+
+      const thief = steal(locks); // a steal takes the held lock, never B's queued request
+      await flush();
+      expect(log).toEqual(["A:promoted", "A:demoted"]);
+      expect(a.leadership()).toBe("standby");
+      expect(b.leadership()).toBe("standby");
+      expect((await locks.query()).pending).toHaveLength(2); // B, then A again
+
+      await b.leader.stop();
+      await a.leader.stop();
+      expect(a.leadership()).toBe("pending");
+      expect(b.leadership()).toBe("pending");
+      expect((await locks.query()).pending).toEqual([]);
+      expect(locks.heldNames()).toEqual([NAME]); // only the thief
+      thief.release();
+      await thief.done;
+      await flush();
+      expect(locks.heldNames()).toEqual([]);
+      expect(log).toEqual(["A:promoted", "A:demoted"]);
+      expect(tracker.unhandled).toEqual([]);
+    } finally {
+      tracker.dispose();
+    }
+  });
+
+  it("stop() during the stolen leader's demotion waits for onDemoted", async () => {
+    const locks = new FakeLockManager();
+    const log: string[] = [];
+    const a = makeTab("A", locks, log, { demoteDelayMs: 20 });
+    a.leader.start();
+    await flush();
+    const thief = steal(locks);
+    await flush();
+    await a.leader.stop();
+    expect(log).toEqual(["A:promoted", "A:demoted"]);
+    expect(a.leadership()).toBe("pending");
+    expect((await locks.query()).pending).toEqual([]);
+    thief.release();
+    await thief.done;
+    await flush();
+    expect(locks.heldNames()).toEqual([]);
+    expect(log).toEqual(["A:promoted", "A:demoted"]);
+  });
+});
+
+describe("createLeader stolen between grant and callback", () => {
+  it("never promotes the stale grant and re-queues behind the thief", async () => {
+    const inner = new FakeLockManager();
+    const { locks, runDeferred } = deferringLocks(inner);
+    const log: string[] = [];
+    const onError = vi.fn();
+    const a = makeTab("A", locks, log, { onError });
+    a.leader.start();
+    await flush();
+    expect(inner.heldNames()).toEqual([NAME]); // granted, callback held back
+    let releaseThief!: () => void;
+    const thiefDone = inner.request(
+      NAME,
+      { steal: true },
+      () =>
+        new Promise<void>((resolve) => {
+          releaseThief = resolve;
+        }),
+    );
+    await flush();
+    runDeferred(); // the stale callback finally runs
+    await flush();
+    expect(log).toEqual([]);
+    expect(a.leadership()).not.toBe("leader");
+    expect((await inner.query()).pending).toHaveLength(1);
+    expect(onError).not.toHaveBeenCalled();
+    releaseThief();
+    await thiefDone;
+    await flush();
+    runDeferred();
+    await flush();
+    expect(log).toEqual(["A:promoted"]);
+    expect(a.leadership()).toBe("leader");
+    const stopping = a.leader.stop();
+    await stopping;
+    expect(inner.heldNames()).toEqual([]);
+  });
+});
+
+describe("createLeader error reporting", () => {
+  const failingLocks = (failure: unknown): LocksLike => ({
+    query: async () => ({ held: [], pending: [] }),
+    request: (() => Promise.reject(failure)) as LocksLike["request"],
+  });
+
+  it("a failing request is reported on every retry and stop() ends it", async () => {
+    vi.useFakeTimers();
+    const failure = new DOMException("denied", "SecurityError");
+    const onError = vi.fn();
+    const leader = createLeader({ name: NAME, locks: failingLocks(failure), onError });
+    leader.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith(failure);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(onError).toHaveBeenCalledTimes(2);
+    const stopping = leader.stop();
+    await vi.advanceTimersByTimeAsync(1000);
+    await stopping;
+    expect(leader.getState()).toBe("pending");
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(onError).toHaveBeenCalledTimes(2);
+  });
+
+  it("without onError a failing request goes to globalThis.reportError, else console.error", async () => {
+    vi.useFakeTimers();
+    const failure = new Error("nope");
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const leader = createLeader({ name: NAME, locks: failingLocks(failure) });
+      leader.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(consoleError).toHaveBeenCalledWith(failure);
+
+      const hostReport = vi.fn();
+      vi.stubGlobal("reportError", hostReport);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(hostReport).toHaveBeenCalledWith(failure);
+      expect(consoleError).toHaveBeenCalledTimes(1);
+
+      const stopping = leader.stop();
+      await vi.advanceTimersByTimeAsync(1000);
+      await stopping;
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("a throwing onError is swallowed", async () => {
+    const locks = new FakeLockManager();
+    const onError = vi.fn(() => {
+      throw new Error("handler failed");
+    });
+    const leader = createLeader({
+      name: NAME,
+      locks,
+      onError,
+      onPromoted: () => {
+        throw new Error("x");
+      },
+    });
+    leader.start();
+    await flush();
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(leader.getState()).toBe("leader");
+    await leader.stop();
+    expect(locks.heldNames()).toEqual([]);
+  });
+
+  it("its own aborts (stop while queued, freeze) are not reported", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const locks = new FakeLockManager();
+      const page = fakePageEvents();
+      const onError = vi.fn();
+      const a = createLeader({ name: NAME, locks });
+      const b = createLeader({ name: NAME, locks, onError, pageEvents: page.events });
+      const c = createLeader({ name: NAME, locks, onError });
+      a.start();
+      await flush();
+      b.start();
+      c.start();
+      await flush();
+      expect((await locks.query()).pending).toHaveLength(2);
+      page.freeze(); // B aborts its queued request
+      await c.stop(); // C aborts its queued request
+      await flush();
+      expect((await locks.query()).pending).toEqual([]);
+      await a.stop();
+      await b.stop();
+      expect(onError).not.toHaveBeenCalled();
+      expect(consoleError).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });

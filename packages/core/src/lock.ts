@@ -1,10 +1,11 @@
+import { reportError } from "./errors.ts";
 import { resolveLocks } from "./support.ts";
 import type { LocksLike } from "./types.ts";
 
 export type LockHandle = {
   readonly name: string;
   /** Idempotent; resolves once the underlying request has finished. */
-  release(): Promise<void>;
+  release: () => Promise<void>;
 };
 
 export type AcquireOptions = {
@@ -15,12 +16,19 @@ export type AcquireOptions = {
   locks?: LocksLike;
   /** Called if the lock is taken from this holder (e.g. stolen). */
   onLost?: () => void;
+  /**
+   * Receives errors thrown by callbacks such as `onLost`. Defaults to the
+   * global `reportError` (or `console.error`).
+   */
+  onError?: (error: unknown) => void;
 };
 
 /**
  * Acquire a named lock. Resolves a handle once granted, or `null` when the API
  * is unsupported or `ifAvailable` finds the lock taken. Rejects with
- * `AbortError` if `signal` aborts while queued.
+ * `signal.reason` if `signal` aborts while queued (an `AbortError`
+ * `DOMException` unless a reason was passed to `abort()`), and with the lock
+ * manager's error for invalid requests.
  */
 export function acquireLock(
   name: string,
@@ -28,11 +36,10 @@ export function acquireLock(
 ): Promise<LockHandle | null> {
   const manager = resolveLocks(options.locks);
   if (!manager) return Promise.resolve(null);
-  const { mode, ifAvailable, steal, signal, onLost } = options;
+  const { mode, ifAvailable, steal, signal, onLost, onError } = options;
 
   return new Promise<LockHandle | null>((resolve, reject) => {
     let granted = false;
-    let lost = false;
     let freeLock!: () => void;
     const held = new Promise<void>((r) => {
       freeLock = r;
@@ -56,16 +63,17 @@ export function acquireLock(
           return;
         }
         // Granted, then the request failed: the lock was taken from us (steal).
-        if (!lost) {
-          lost = true;
+        try {
           onLost?.();
+        } catch (error) {
+          reportError(onError, error);
         }
       },
     );
 
     const handle: LockHandle = {
       name,
-      release() {
+      release: () => {
         freeLock();
         return finished;
       },

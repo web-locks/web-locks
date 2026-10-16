@@ -2,6 +2,7 @@ import { FakeLockManager } from "@web-locks/fake-locks";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { acquireLock } from "../src/lock.ts";
 import { createLockStatus } from "../src/status.ts";
+import type { LocksLike } from "../src/types.ts";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -110,12 +111,14 @@ describe("createLockStatus", () => {
     expect(locks.heldNames()).toEqual([]);
   });
 
-  it("stolen lock returns to idle and calls user onLost", async () => {
+  it("stolen lock returns to idle and calls user onLost (a throw goes to onError)", async () => {
     const locks = new FakeLockManager();
+    const boom = new Error("boom");
     const onLost = vi.fn(() => {
-      throw new Error("boom");
+      throw boom;
     });
-    const s = createLockStatus("x", { locks, onLost });
+    const onError = vi.fn();
+    const s = createLockStatus("x", { locks, onLost, onError });
     s.start();
     await tick();
     expect(s.getState()).toBe("held");
@@ -123,19 +126,24 @@ describe("createLockStatus", () => {
     await tick();
     expect(s.getState()).toBe("idle");
     expect(onLost).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith(boom);
     await thief!.release();
   });
 
-  it("onAcquired fires once and a throwing one does not break the store", async () => {
+  it("onAcquired fires once and a throwing one goes to onError without breaking the store", async () => {
     const locks = new FakeLockManager();
+    const boom = new Error("boom");
     const onAcquired = vi.fn(() => {
-      throw new Error("boom");
+      throw boom;
     });
-    const s = createLockStatus("x", { locks, onAcquired });
+    const onError = vi.fn();
+    const s = createLockStatus("x", { locks, onAcquired, onError });
     s.start();
     await tick();
     expect(s.getState()).toBe("held");
     expect(onAcquired).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith(boom);
     await s.release();
   });
 
@@ -209,5 +217,92 @@ describe("createLockStatus", () => {
     expect(s.getState()).toBe("held");
     expect(onLost).not.toHaveBeenCalled();
     await s.release();
+  });
+
+  describe("error reporting", () => {
+    const failingLocks = (failure: unknown): LocksLike => ({
+      query: async () => ({ held: [], pending: [] }),
+      request: (() => Promise.reject(failure)) as LocksLike["request"],
+    });
+
+    it("a request failing before the grant is reported, then idle", async () => {
+      const failure = new DOMException("steal and ifAvailable", "NotSupportedError");
+      const onError = vi.fn();
+      const s = createLockStatus("x", { locks: failingLocks(failure), onError });
+      s.start();
+      expect(s.getState()).toBe("pending");
+      await tick();
+      expect(s.getState()).toBe("idle");
+      expect(onError).toHaveBeenCalledTimes(1);
+      expect(onError).toHaveBeenCalledWith(failure);
+    });
+
+    it("without onError the failure goes to console.error and nothing rejects", async () => {
+      const unhandled: unknown[] = [];
+      const listener = (reason: unknown) => unhandled.push(reason);
+      process.on("unhandledRejection", listener);
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        const failure = new Error("nope");
+        const s = createLockStatus("x", { locks: failingLocks(failure) });
+        s.start();
+        await tick();
+        expect(s.getState()).toBe("idle");
+        expect(consoleError).toHaveBeenCalledWith(failure);
+        await s.release();
+        await tick();
+        expect(unhandled).toEqual([]);
+      } finally {
+        consoleError.mockRestore();
+        process.off("unhandledRejection", listener);
+      }
+    });
+
+    it("a throwing onError is swallowed", async () => {
+      const onError = vi.fn(() => {
+        throw new Error("handler failed");
+      });
+      const s = createLockStatus("x", { locks: failingLocks(new Error("nope")), onError });
+      s.start();
+      await tick();
+      expect(onError).toHaveBeenCalledTimes(1);
+      expect(s.getState()).toBe("idle");
+    });
+
+    it("release() aborting a queued request is not reported", async () => {
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        const locks = new FakeLockManager();
+        const holder = await acquireLock("x", { locks });
+        const onError = vi.fn();
+        const s = createLockStatus("x", { locks, onError });
+        s.start();
+        await tick();
+        expect((await locks.query()).pending).toHaveLength(1);
+        await s.release();
+        await tick();
+        expect((await locks.query()).pending).toEqual([]);
+        expect(onError).not.toHaveBeenCalled();
+        expect(consoleError).not.toHaveBeenCalled();
+        await holder!.release();
+      } finally {
+        consoleError.mockRestore();
+      }
+    });
+
+    it("a caller-supplied signal aborting a queued request is not reported", async () => {
+      const locks = new FakeLockManager();
+      const holder = await acquireLock("x", { locks });
+      const ctrl = new AbortController();
+      const onError = vi.fn();
+      const s = createLockStatus("x", { locks, signal: ctrl.signal, onError });
+      s.start();
+      await tick();
+      ctrl.abort();
+      await tick();
+      expect(s.getState()).toBe("idle");
+      expect(onError).not.toHaveBeenCalled();
+      await holder!.release();
+    });
   });
 });

@@ -1,3 +1,4 @@
+import { reportError } from "./errors.ts";
 import { resolveLocks } from "./support.ts";
 import type { LeadershipState, LocksLike, Store } from "./types.ts";
 
@@ -14,8 +15,12 @@ export type LeaderOptions = {
   onPromoted?(): void | Promise<void>;
   /** Runs before the lock is released, so the next leader never overlaps this one. */
   onDemoted?(): void | Promise<void>;
-  /** Receives errors thrown by the hooks and failed lock requests. */
-  onError?(error: unknown): void;
+  /**
+   * Receives errors thrown by the hooks and failed lock requests (which are
+   * retried every second). Defaults to the global `reportError` (or
+   * `console.error`).
+   */
+  onError?: (error: unknown) => void;
   /** Lock manager to use; defaults to `navigator.locks`. */
   locks?: LocksLike;
   /** Defaults to `windowPageEvents` when `document` exists. */
@@ -23,9 +28,10 @@ export type LeaderOptions = {
 };
 
 export type Leader = Store<LeadershipState> & {
-  start(): void;
+  /** Joins the election. Idempotent. */
+  start: () => void;
   /** Gives up leadership (or a queued request) and waits until demotion has finished. */
-  stop(): Promise<void>;
+  stop: () => Promise<void>;
 };
 
 const RETRY_MS = 1000;
@@ -56,6 +62,7 @@ export function createLeader(options: LeaderOptions): Leader {
   let leading = false;
   let resignRequested = false;
   let resignLead: (() => void) | null = null;
+  let currentLead: Promise<void> | null = null;
   let abort: AbortController | null = null;
   let loopPromise: Promise<void> | null = null;
   let stopPromise: Promise<void> | null = null;
@@ -69,13 +76,7 @@ export function createLeader(options: LeaderOptions): Leader {
     for (const listener of listeners) listener();
   };
 
-  const reportError = (error: unknown) => {
-    try {
-      options.onError?.(error);
-    } catch {
-      // ignore
-    }
-  };
+  const report = (error: unknown) => reportError(options.onError, error);
 
   const resign = () => {
     if (!leading) {
@@ -96,7 +97,7 @@ export function createLeader(options: LeaderOptions): Leader {
     try {
       await options.onPromoted?.();
     } catch (error) {
-      reportError(error);
+      report(error);
     }
     if (!resignRequested) {
       await new Promise<void>((resolve) => {
@@ -107,7 +108,7 @@ export function createLeader(options: LeaderOptions): Leader {
     try {
       await options.onDemoted?.();
     } catch (error) {
-      reportError(error);
+      report(error);
     }
     leading = false;
     setState("standby");
@@ -119,11 +120,23 @@ export function createLeader(options: LeaderOptions): Leader {
     const lockOptions: LockOptions = abort
       ? { mode: "exclusive", signal: abort.signal }
       : { mode: "exclusive", ifAvailable: true };
-    return locks!.request(name, lockOptions, async (lock) => {
-      if (!lock) return false;
-      await lead();
+    let failed = false;
+    const request = locks!.request(name, lockOptions, async (lock) => {
+      // A request that already failed (stolen before this callback ran) must not lead.
+      if (!lock || failed) return false;
+      const led = lead();
+      currentLead = led;
+      try {
+        await led;
+      } finally {
+        currentLead = null;
+      }
       return true;
     }) as Promise<boolean>;
+    request.catch(() => {
+      failed = true;
+    });
+    return request;
   };
 
   const loop = async () => {
@@ -134,8 +147,23 @@ export function createLeader(options: LeaderOptions): Leader {
         if (!led && running && !paused) setState("standby");
         ifAvailable = false; // from now on, queue behind whoever holds the lock
       } catch (error) {
-        if (isAbort(error)) break;
-        reportError(error);
+        // The request failed while our callback was still leading: the lock was
+        // taken from us (another context requested it with `steal`). Demote now
+        // and wait until onDemoted has finished before queueing again.
+        const lost = leading;
+        if (lost) {
+          resignRequested = true;
+          resignLead?.();
+          await currentLead;
+        }
+        // Our own abort (stop or freeze): leave the loop. Stolen locks re-queue.
+        if (!running || paused || abort?.signal.aborted) break;
+        if (isAbort(error)) {
+          // Not our abort, so the lock was stolen (possibly before our callback ran).
+          ifAvailable = false; // queue behind the thief
+          continue;
+        }
+        report(error);
         await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
       }
     }
@@ -197,20 +225,20 @@ export function createLeader(options: LeaderOptions): Leader {
 
   return {
     getState: () => state,
-    subscribe(listener) {
+    subscribe: (listener) => {
       listeners.add(listener);
       return () => {
         listeners.delete(listener);
       };
     },
-    start() {
+    start: () => {
       generation++;
       targetStart = true;
       // A stop in flight runs this start when it finishes.
       if (stopPromise) return;
       doStart();
     },
-    async stop() {
+    stop: async () => {
       generation++;
       targetStart = false;
       if (stopPromise) {

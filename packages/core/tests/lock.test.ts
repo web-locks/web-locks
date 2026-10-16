@@ -85,4 +85,47 @@ describe("acquireLock", () => {
     };
     await expect(acquireLock("x", { locks: locks as never })).rejects.toBe(boom);
   });
+
+  it("a throwing onLost is reported, causes no unhandled rejection, and release() resolves", async () => {
+    const locks = new FakeLockManager();
+    const unhandled: unknown[] = [];
+    const listener = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", listener);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const boom = new Error("onLost failed");
+      const onError = vi.fn();
+      const a = await acquireLock("x", {
+        locks,
+        onError,
+        onLost: () => {
+          throw boom;
+        },
+      });
+      const b = await acquireLock("x", { locks, steal: true });
+      await tick();
+      await tick();
+      expect(onError).toHaveBeenCalledWith(boom);
+      await expect(a!.release()).resolves.toBeUndefined();
+      await b!.release();
+
+      // Without onError: console.error.
+      const c = await acquireLock("y", {
+        locks,
+        onLost: () => {
+          throw boom;
+        },
+      });
+      const d = await acquireLock("y", { locks, steal: true });
+      await tick();
+      expect(consoleError).toHaveBeenCalledWith(boom);
+      await expect(c!.release()).resolves.toBeUndefined();
+      await d!.release();
+      await tick();
+      expect(unhandled).toEqual([]);
+    } finally {
+      consoleError.mockRestore();
+      process.off("unhandledRejection", listener);
+    }
+  });
 });
